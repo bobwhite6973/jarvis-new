@@ -1,21 +1,4 @@
-        async def run(self):
-        app = Application.builder().token(self.token).build()
-        app.add_handler(CommandHandler("start", self.cmd_start))
-        app.add_handler(CommandHandler("help", self.cmd_help))
-        app.add_handler(CommandHandler("model", self.cmd_model))
-        app.add_handler(CommandHandler("clear", self.cmd_clear))
-        app.add_handler(CommandHandler("status", self.cmd_status))
-        app.add_handler(CommandHandler("pnl", self.cmd_pnl))
-        app.add_handler(CommandHandler("arb", self.cmd_arb))
-        app.add_handler(CommandHandler("genbot", self.cmd_genbot))
-        app.add_handler(CallbackQueryHandler(self.cb_model, pattern="^model:"))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        log.info("Telegram bot polling...")
-        async with app:
-            await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
-            await asyncio.Event().wait()
-async def run(self):
+    async def run(self):
         app = Application.builder().token(self.token).build()
         app.add_handler(CommandHandler("start", self.cmd_start))
         app.add_handler(CommandHandler("help", self.cmd_help))
