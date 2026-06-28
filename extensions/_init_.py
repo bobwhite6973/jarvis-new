@@ -1,19 +1,13 @@
-"""
-Extension loader — auto-registers all extensions with Brain at startup.
-"""
-
 import importlib
 import logging
 from pathlib import Path
 
 log = logging.getLogger("jarvis.extensions")
 
-
 def load_all(brain):
     ext_dir = Path(__file__).parent
     loaded = []
     failed = []
-
     for path in sorted(ext_dir.glob("*.py")):
         if path.name.startswith("_"):
             continue
@@ -24,11 +18,10 @@ def load_all(brain):
                 mod.register(brain)
                 loaded.append(path.stem)
             else:
-                log.warning(f"Extension {path.stem} has no register() — skipped")
+                log.warning(f"{path.stem} has no register() — skipped")
         except Exception as e:
-            log.error(f"Failed to load extension {path.stem}: {e}")
+            log.error(f"Failed to load {path.stem}: {e}")
             failed.append(path.stem)
-
     log.info(f"Extensions loaded: {loaded}")
     if failed:
         log.warning(f"Extensions failed: {failed}")
