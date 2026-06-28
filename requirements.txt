@@ -1,44 +1,18 @@
-chromadb
-diskcache
-gradio-client
-ollama
-psycopg
-llm_axe
-selenium
-fpdf
-docx2pdf
-eel
-ppt2pdf
-fpdf
-nara
-Pillow
-easyocr
-numpy
-sounddevice
-SpeechRecognition
-edge-tts
-pyttsx3
-colorama
-img2pdf
-pywin32
-pyautogui
-beautifulsoup4
-pyperclip
-pptx
-g4f
-flask
-jinja2
-mtranslate
-PyAudio==0.2.14
-vosk==0.3.45
-Requests==2.31.0
-playsound==1.2.2
+# JARVIS - Clean requirements
+# Removed: eel, pyautogui, pyaudio, vosk, pyttsx3, edge-tts, pvporcupine,
+#           opencv, pywin32, psycopg, chromadb, g4f, nara, webscout (desktop/Windows deps)
+
+# Core async
+httpx==0.27.0
 python-dotenv==1.0.1
-NetHyTech-STT==1.0
-groq==0.5.0
-edge-tts==6.1.11
-googlesearch-python==1.2.4
-opencv-python==4.9.0.80
-pvporcupine==1.9.5
-pygame==2.5.2
-webscout==2.9
+
+# Telegram
+python-telegram-bot==21.5
+
+# LLM SDKs
+anthropic==0.34.0
+groq==0.10.0
+openai==1.40.0
+
+# Utilities
+colorama==0.4.6
