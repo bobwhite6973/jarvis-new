@@ -1,5 +1,5 @@
 """
-Brain - Multi-LLM reasoning core with SQLite conversation memory
+brain - Multi-LLM reasoning core with SQLite conversation memory
 Providers: Groq (default), Claude (fallback), OpenAI (optional)
 """
 
