@@ -1,5 +1,5 @@
 """
-telegram Bot - Mobile-first UI for JARVIS
+Telegram Bot - Mobile-first UI for JARVIS
 Commands: /start /help /model /clear /status /pnl /arb /genbot
 """
 
