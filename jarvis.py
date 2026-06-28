@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 from core.brain import Brain
 from core.telegram_bot import TelegramBot
+import voice_webhook
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -32,8 +33,6 @@ async def main():
     log.info(f"Ready. Extensions: {loaded}")
     if failed:
         log.warning(f"Failed: {failed}")
-    bot = TelegramBot(brain)
-    await bot.run()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    voice_webhook
