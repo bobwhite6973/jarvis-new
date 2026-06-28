@@ -1,6 +1,5 @@
 """
-Extension loader — imports and registers all extensions with Brain at startup.
-To add a new extension: drop a .py file in /extensions/ with a register(brain) function.
+Extension loader — auto-registers all extensions with Brain at startup.
 """
 
 import importlib
@@ -11,7 +10,6 @@ log = logging.getLogger("jarvis.extensions")
 
 
 def load_all(brain):
-    """Auto-discover and register all extensions in the extensions/ directory."""
     ext_dir = Path(__file__).parent
     loaded = []
     failed = []
@@ -26,7 +24,7 @@ def load_all(brain):
                 mod.register(brain)
                 loaded.append(path.stem)
             else:
-                log.warning(f"Extension {path.stem} has no register() function — skipped")
+                log.warning(f"Extension {path.stem} has no register() — skipped")
         except Exception as e:
             log.error(f"Failed to load extension {path.stem}: {e}")
             failed.append(path.stem)
