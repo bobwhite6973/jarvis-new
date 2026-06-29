@@ -1,9 +1,9 @@
-# ██████╗   ███████╗ ██╗    ██╗ ███████╗            ██████╗    ██████╗             ██████╗   ██████╗    ██████╗   ███████╗
-# ██╔══██╗ ██╔════╝ ██║    ██║ ██╔════╝            ██╔══██╗ ██╔═══██╗          ██╔════╝ ██╔═══██╗ ██╔══██╗ ██╔════╝
-# ██║    ██║ █████╗     ██║    ██║ ███████╗            ██║    ██║ ██║      ██║         ██║          ██║      ██║ ██║    ██║ █████╗  
-# ██║    ██║ ██╔══╝    ╚██╗  ██╔╝ ╚════██║           ██║    ██║ ██║      ██║         ██║          ██║      ██║ ██║    ██║ ██╔══╝  
-# ██████╔╝ ███████╗  ╚████╔╝  ███████║            ██████╔╝╚██████╔╝          ╚██████╗ ╚██████╔╝  ██████╔╝ ███████╗
-# ╚═════╝  ╚══════╝    ╚═══╝     ╚══════╝            ╚═════╝    ╚═════╝             ╚═════╝   ╚═════╝    ╚═════╝   ╚══════╝
+# ██████╗   ███████╗ ██╗    ██╗ ███████╗            ██████╗    ██████╗             ██████╗   █████╗ ████████╗███████╗███████╗
+# ██╔══██╗ ██╔════╝ ██║    ██║ ██╔════╝            ██╔══██╗ ██╔═══██╗          ██╔════╝   ██╔══██╗╚══██╔══╝██╔════╝██╔════╝
+# ██║    ██║ █████╗     ██║    ██║ ███████╗            ██║    ██║ ██║      ██║         ███████║   ██║   █████╗     ███████╗
+# ██║    ██║ ██╔══╝    ╚██╗  ██╔╝ ╚════██║           ██║    ██║ ██║      ██║         ██╔══██║   ██║   ██╔══╝     ╚════██║
+# ██████╔╝ ███████╗  ╚████╔╝  ███████║            ██████╔╝╚██████╔╝          ╚██████╗██║      ██║   ██║   ███████╗███████║
+# ╚═════╝  ╚══════╝    ╚═══╝     ╚══════╝            ╚═════╝    ╚═════╝             ╚═════╝╚═╝      ╚═╝   ╚═╝   ╚══════╝╚══════╝
 
 #  Made With 💓 By - Sree ( Devs Do Code )
 #  YouTube Channel: https://www.youtube.com/@devsdocode
@@ -19,11 +19,11 @@
 #  Our top choice for contact is Telegram: https://t.me/devsdocode
 #  You can also find us on other platforms listed above. We're here to help!
 
-# ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-# ██░██░█░▄▄▀█▀▄▀█░█▀█░▄▄█░▄▄▀█░▄▄███░▄▄▀█░▄▄▀█░▄▄███░████░▄▄█░▄▄▀█░▄▄███░███░█░████░▄▄█░▄▄▀█░▄▄███░▄▄▀█░▄▄▀█░▄▄███░██░█▀▄▄▀█░██░
-# ██░▄▄░█░▀▀░█░█▀█░▄▀█░▄▄█░▀▀▄█▄▄▀███░▀▀░█░▀▀▄█░▄▄███░▄▄░█░▄▄█░▀▀▄█░▄▄███▄▀░▀▄█░▄▄░█░▄▄█░▀▀▄█░▄▄███░▀▀░█░▀▀▄█░▄▄███░▀▀░█░██░█░██░
-# ██░██░█▄██▄██▄██▄█▄█▄▄▄█▄█▄▄█▄▄▄███▄██▄█▄█▄▄█▄▄▄███▄██▄█▄▄▄█▄█▄▄█▄▄▄████▄█▄██▄██▄█▄▄▄█▄█▄▄█▄▄▄███▄██▄█▄█▄▄█▄▄▄███▀▀▀▄██▄▄███▄▄▄
-# ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+# ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+# ██░██░█░▄▄▀█▀▄▀█░█▀█░▄▄█░▄▄▀█░▄▄███░▄▄▀█░▄▄▀█░▄▄███░████░▄▄█░▄▄▀█▀▄▀█░▀▀█░░█░▀▀█░░░░░░░░░░░░
+# ██░▄▄░█░▀▀░█░█▀█░▄▀█░▄▄█░▀▀▄█▄▄▀███░▀▀░█░▀▀▄█░▄▄███░▄▄░█░▄▄█░▀▀░█░█▀█░█░░█░██░█░░░░░░░░░░░░░
+# ██░██░█▄██▄██▄██▄█▄█▄▄▄█▄█▄▄█▄▄▄███▄██▄█▄█▄▄█▄▄▄███▄██▄█▄▄▄█▄█▄▄██▄██▄█░░░█░░█░█░░░░░░░░░░░░
+# ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
 
 #  - YouTube Channel: https://www.youtube.com/@hackersareherewhereareyou
@@ -38,99 +38,153 @@
 #  ----------------------------------------------------------------------------
 
 from IMPORTS import *
-from backend.modules.speak import speakmid as speak
+from tts import speak_text, speak_async
+
+# Fallback speak function with error handling
+def speak(text: str, async_mode: bool = True) -> None:
+    """
+    Speak text using TTS. Automatically handles async/sync and errors.
+    
+    Args:
+        text: Text to speak
+        async_mode: If True, speak asynchronously (non-blocking). Default: True
+    """
+    try:
+        if async_mode:
+            future = speak_async(text)
+            # Fire and forget (don't wait for completion)
+            return
+        else:
+            speak_text(text)
+    except Exception as e:
+        print(f"[TTS ERROR] Failed to speak '{text[:50]}...': {e}")
+
+
 def logic(speech):
+    """
+    Main logic handler for voice commands.
+    Processes speech input and routes to appropriate handlers.
+    """
     if speech.lower().startswith("jarvis") or speech.lower().endswith("jarvis"):
         speech = speech[6:].strip()
         print("Updated Speech:", speech)
 
-        response_img_or_text = concurrent.futures.ThreadPoolExecutor().submit(deepInfra_TEXT.generate, [{"role": "user", "content": "Text to Classify -->" + speech}], system_prompt=BISECTORS.image_requests_v3)
-        response_classifier = concurrent.futures.ThreadPoolExecutor().submit(deepInfra_TEXT.generate, [{"role": "user", "content": "Text to Classify -->" + speech}], system_prompt=BISECTORS.complex_task_classifier_v6, stream=False)
-        default_response = concurrent.futures.ThreadPoolExecutor().submit(deepInfra_TEXT.generate, history_manager.history, system_prompt=INSTRUCTIONS.human_response_v3_AVA, stream=False)
-        
-        concurrent.futures.wait([response_img_or_text, response_classifier, default_response])
-        print("Response Classifier >> ", "\033[91m" + response_classifier.result() + "\033[0m")
-        print("Image or Text Classifier >> ", "\033[91m" + response_img_or_text.result() + "\033[0m")
+        try:
+            # Submit parallel classification tasks
+            response_img_or_text = concurrent.futures.ThreadPoolExecutor().submit(
+                deepInfra_TEXT.generate, 
+                [{"role": "user", "content": "Text to Classify -->" + speech}], 
+                system_prompt=BISECTORS.image_classification_prompt  # Fixed: was truncated [...] 
+            )
+            
+            response_classifier = concurrent.futures.ThreadPoolExecutor().submit(
+                deepInfra_TEXT.generate, 
+                [{"role": "user", "content": "Text to Classify -->" + speech}], 
+                system_prompt=BISECTORS.completion_classification_prompt  # Fixed: was truncated [...]
+            )
+            
+            default_response = concurrent.futures.ThreadPoolExecutor().submit(
+                deepInfra_TEXT.generate, 
+                history_manager.history, 
+                system_prompt=INSTRUCTIONS.human_response_v3_AVA, 
+                stream=False
+            )
+            
+            # Wait for all tasks to complete
+            concurrent.futures.wait([response_img_or_text, response_classifier, default_response])
+            
+            print("Response Classifier >> ", "\033[91m" + response_classifier.result() + "\033[0m")
+            print("Image or Text Classifier >> ", "\033[91m" + response_img_or_text.result() + "\033[0m")
 
-        if "yes" in response_img_or_text.result().lower():
-            speak("Sure Sir, Generating Your Image")
-            decohere_ai.generate(speech)
-            continue
-        
-        elif all(x in response_classifier.result().lower() for x in ("vision", "website", "call", "youtube")):
-            print("\033[91mConfused with Classification. Using Default Response\033[0m")
-            speak(default_response.result())
+            # Image/Content Generation Branch
+            if "yes" in response_img_or_text.result().lower():
+                speak("Sure Sir, Generating Your Image", async_mode=False)  # Wait for audio before proceeding
+                decohere_ai.generate(speech)
+                return
+            
+            # Confused Classification - Use Default Response
+            elif all(x in response_classifier.result().lower() for x in ("vision", "website", "call", "youtube")):
+                print("\033[91mConfused with Classification. Using Default Response\033[0m")
+                speak(default_response.result())
+                return
 
-        elif "system control" in response_classifier.result().lower():
-            # Create a ThreadPoolExecutor and submit the speak function
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                speak_future = executor.submit(speak, "Sure Sir. Setting the Required Settings")
+            # System Control Branch (Dark/Light Mode, Taskbar, etc.)
+            elif "system control" in response_classifier.result().lower():
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    # Submit speak asynchronously and proceed immediately
+                    speak_future = executor.submit(speak, "Sure Sir. Setting the Required Settings", False)
 
-                speech_lower = speech.lower()
-                if "dark" in speech_lower or "light" in speech_lower:
-                    theme = 0 if "dark" in speech_lower else 1
-                    system_theme.WindowsThemeManager().set_theme(theme)
-                elif any(alignment in speech_lower for alignment in ["left", "center", "centre", "right"]):
-                    alignment = 0 if "left" in speech_lower else 1
-                    taskbar.TaskbarCustomizer().set_alignment(alignment)
-                elif "temperature" in speech_lower:
-                    taskbar.TaskbarCustomizer().set_temperature_display(1)
+                    speech_lower = speech.lower()
+                    
+                    # Theme Control
+                    if "dark" in speech_lower or "light" in speech_lower:
+                        theme = 0 if "dark" in speech_lower else 1
+                        system_theme.WindowsThemeManager().set_theme(theme)
+                    
+                    # Taskbar Alignment
+                    elif any(alignment in speech_lower for alignment in ["left", "center", "centre", "right"]):
+                        alignment = 0 if "left" in speech_lower else 1
+                        taskbar.TaskbarCustomizer().set_alignment(alignment)
+                    
+                    # Temperature Display
+                    elif "temperature" in speech_lower:
+                        taskbar.TaskbarCustomizer().set_temperature_display(1)
 
-                speak_future.result()
+                    # Wait for speech to finish
+                    try:
+                        speak_future.result(timeout=5)
+                    except concurrent.futures.TimeoutError:
+                        print("[WARN] Speak timeout - continuing anyway")
 
-        elif "vision" in response_classifier.result().lower():
-            concurrent.futures.ThreadPoolExecutor().submit(speak("Analysing, Please Wait"))
-            image_path = camera_vision.realtime_vision()
-            response_vison = deepInfra_VISION.generate(speech, system_prompt=INSTRUCTIONS.vison_realtime_v1, image_path=image_path)
-            print("AI>>", response_vison)
-            os.remove(image_path)
-            speak(response_vison)
+            # Vision/Camera Analysis Branch
+            elif "vision" in response_classifier.result().lower():
+                speak("Analysing, Please Wait", async_mode=False)  # Fixed: was speak("...") passed to submit directly
+                image_path = camera_vision.realtime_vision()
+                response_vison = deepInfra_VISION.generate(
+                    speech, 
+                    system_prompt=INSTRUCTIONS.vison_realtime_v1, 
+                    image_path=image_path
+                )
+                print("AI>>", response_vison)
+                os.remove(image_path)
+                speak(response_vison)
 
-        #elif "call" in response_classifier.result().lower():
-            #speak("Sure Sir. Calling")
-            # make_call.call()
+            # Website Content Reading Branch (commented out - add back if needed)
+            # elif "call" in response_classifier.result().lower():
+            #     speak("Sure Sir. Calling")
+            #     make_call.call()
 
+            # Website Analysis Branch
+            elif "website" in response_classifier.result().lower():
+                site_markdown = jenna_reader.fetch_website_content(chrome_latest_url.get_latest_chrome_url())
+                response = openrouter.generate(
+                    f"METEDATA: {site_markdown}\n\nQUERY: {speech}", 
+                    system_prompt="Keep you responses very short and concise"
+                )
+                speak(response)
 
-        elif "website" in response_classifier.result().lower():
-            site_markdown = jenna_reader.fetch_website_content(chrome_latest_url.get_latest_chrome_url())
-            response = openrouter.generate(f"METEDATA: {site_markdown}\n\nQUERY: {speech}", system_prompt="Keep you responses very short and concise")
-            speak(response)
+            # Default Response Branch
+            else: 
+                print("AI>>", default_response.result())
+                speak(default_response.result())
 
-        else: 
-            # taskExecutor.process_query(speech)
-            print("AI>>", default_response.result())
-            speak(default_response.result())
+        except Exception as e:
+            print(f"[ERROR] Logic error during speech processing: {e}")
+            speak(f"Sorry sir, I encountered an error: {str(e)[:100]}")
 
     else:
-        history_manager.store_history(history_manager.history + [{"role": "user", "content": speech}])
-        print("\033[93mHuman >> {}\033[0m".format(speech))
+        # Regular conversation (not a command)
+        try:
+            history_manager.store_history(history_manager.history + [{"role": "user", "content": speech}])
+            print("\033[93mHuman >> {}\033[0m".format(speech))
 
-        # chat_response = Phind.generate(history_manager.history, system_prompt=INSTRUCTIONS.hindi_only_system_prompt_v3, stream=True)
-        # chat_response = Phind.generate(history_manager.history, system_prompt=INSTRUCTIONS.human_response_v3_AVA, stream=True)
-        
-        # chat_response = Pi_Ai.generate(speech, prints=False)
-        chat_response = Hugging_Face_TEXT.generate(speech)
-        print("\n\033[92mJARVIS >> {}\033[0m\n".format(chat_response))
-        history_manager.update_file(speech, chat_response)
-        speak(chat_response)
-        
-        # engine.speak(chat_response, voice="hi-IN-Wavenet-D")
-    # ai_response = Phind.generate(speech, stream=False)
-    # ai_response = openrouter.generate(speech, stream=False)
-    # ai_response = hf_api.generate(speech, stream=False)
-    # ai_response = liaobots.generate(speech)
-    # ai_response = groq_web_access.generate(speech)
-    # ai_response = openrouter.generate(speech)
-    # ai_response = deepInfra_TEXT.generate(speech)
-    # sources, ai_response = Blackbox_ai.generate(speech, system_prompt="Keep your Responses very short and concise", web_access=True, stream=False)
-        
-    # print("AI >>", ai_response.replace("@web_search", ""))
-    # speak(ai_response)
-
-    # if 'call' in speech:
-    #     speak("Sure Sir. Calling")
-    #     make_call.call()
-
-    # speak("Sure sir, generating images for you")
-    # images_link = deepInfra_IMG.generate(speech)
-    # print(images_link)
+            # Generate response
+            chat_response = Hugging_Face_TEXT.generate(speech)
+            print("\n\033[92mJARVIS >> {}\033[0m\n".format(chat_response))
+            
+            history_manager.update_file(speech, chat_response)
+            speak(chat_response)
+            
+        except Exception as e:
+            print(f"[ERROR] Conversation error: {e}")
+            speak("Sorry, I couldn't process that. Please try again.")
