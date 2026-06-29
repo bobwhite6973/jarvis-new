@@ -62,6 +62,10 @@ class Brain:
     def register_tool(self, name: str, fn: callable):
         self.tools[name] = fn
         log.info(f"Tool registered: {name}")
+        
+        def register_extension(self, name: str, fn: callable):
+    """Alias for register_tool — used by extensions that call register_extension."""
+    self.register_tool(name, fn)
 
     def run_tool(self, name: str, **kwargs):
         if name not in self.tools:
