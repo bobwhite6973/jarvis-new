@@ -10,35 +10,30 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 log = logging.getLogger("jarvis")
 
 def load_extensions(brain):
-ext_dir = Path(__file__).parent / "extensions"
-loaded, failed = [], []
-for path in sorted(ext_dir.glob("*.py")):
-if path.name.startswith("_"):
-continue
-try:
-mod = importlib.import_module(f"extensions.{path.stem}")
-if hasattr(mod, "register"):
-mod.register(brain)
-loaded.append(path.stem)
-except Exception as e:
-log.error(f"Extension {path.stem} failed: {e}")
-failed.append(path.stem)
-return loaded, failed
+    ext_dir = Path(__file__).parent / "extensions"
+    loaded, failed = [], []
+    for path in sorted(ext_dir.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            mod = importlib.import_module(f"extensions.{path.stem}")
+            if hasattr(mod, "register"):
+                mod.register(brain)
+            loaded.append(path.stem)
+        except Exception as e:
+            log.error(f"Extension {path.stem} failed: {e}")
+            failed.append(path.stem)
+    return loaded, failed
 
 async def main():
-log.info("JARVIS starting up...")
-brain = Brain()
-loaded, failed = load_extensions(brain)
-log.info(f"Ready. Extensions: {loaded}")
-if failed:
-log.warning(f"Failed: {failed}")
-bot = TelegramBot(brain)
-await bot.run()
+    log.info("JARVIS starting up...")
+    brain = Brain()
+    loaded, failed = load_extensions(brain)
+    log.info(f"Ready. Extensions: {loaded}")
+    if failed:
+        log.warning(f"Failed: {failed}")
+    bot = TelegramBot(brain)
+    await bot.run()
 
 if __name__ == "__main__":
-asyncio.run(main())
-
-
-
-
-Sent from my iPhone
+    asyncio.run(main())
