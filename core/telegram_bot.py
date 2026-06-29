@@ -293,7 +293,7 @@ def _format_status(result: dict) -> str:
 
 # ── Start ──────────────────────────────────────────────────────────────────────
 
-def start_telegram_bot(brain):
+async def start_telegram_bot(brain):
     global _brain
     _brain = brain
 
