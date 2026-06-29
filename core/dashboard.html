@@ -130,6 +130,7 @@ header h1 { color: #4db8ff; font-size: 1rem; letter-spacing: 3px; font-weight: 6
   background: #060609; padding: 0.1rem 0.3rem;
   border-radius: 3px; font-size: 0.8rem; color: #4db8ff; font-family: monospace;
 }
+.msg-bubble img { max-width: 100%; border-radius: 6px; margin-top: 0.5rem; border: 1px solid #1e2d3d; }
 .thinking-dots { display: flex; gap: 4px; padding: 0.25rem 0; }
 .thinking-dots span {
   width: 6px; height: 6px; background: #4db8ff;
@@ -191,12 +192,14 @@ header h1 { color: #4db8ff; font-size: 1rem; letter-spacing: 3px; font-weight: 6
     <div class="sidebar-section">
       <h3>Quick Commands</h3>
       <div class="quick-cmd">
-        <button class="quick-btn" onclick="quickSend('What is the current SOL price?')">◎ SOL Price</button>
-        <button class="quick-btn" onclick="quickSend('Run an arb scan across Raydium, Orca and Meteora')">📈 Arb Scan</button>
-        <button class="quick-btn" onclick="quickSend('Give me a P&L report')">📊 P&L Report</button>
-        <button class="quick-btn" onclick="quickSend('What is the status of all my bots?')">⚙️ Bot Status</button>
-        <button class="quick-btn" onclick="quickSend('What do you remember about me?')">🧠 My Memory</button>
-        <button class="quick-btn" onclick="quickSend('Search the web for latest Solana DeFi news')">🔍 Solana News</button>
+        <button class="quick-btn" onclick="quickSend('/sol')">◎ SOL Price</button>
+        <button class="quick-btn" onclick="quickSend('/arb')">📈 Arb Scan</button>
+        <button class="quick-btn" onclick="quickSend('/pnl')">📊 P&L Report</button>
+        <button class="quick-btn" onclick="quickSend('/status')">⚙️ Bot Status</button>
+        <button class="quick-btn" onclick="quickSend('/recall')">🧠 My Memory</button>
+        <button class="quick-btn" onclick="quickSend('/github repos')">📁 GitHub Repos</button>
+        <button class="quick-btn" onclick="quickSend('/search latest Solana DeFi news')">🔍 Solana News</button>
+        <button class="quick-btn" onclick="quickSend('/screenshot https://dexscreener.com')">📸 DexScreener</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -220,11 +223,11 @@ header h1 { color: #4db8ff; font-size: 1rem; letter-spacing: 3px; font-weight: 6
     <div class="chat-window" id="chat-window"></div>
     <div class="input-area">
       <div class="input-wrap">
-        <textarea id="chat-input" placeholder="Message JARVIS..." rows="1"
+        <textarea id="chat-input" placeholder="Message JARVIS... (or /screenshot https://site.com)" rows="1"
           onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="send-btn" id="send-btn" onclick="sendChat()">↑</button>
       </div>
-      <div class="input-hint">Enter to send · Shift+Enter for new line</div>
+      <div class="input-hint">Enter to send · Shift+Enter for new line · /screenshot /browse /browser /search /sol /arb</div>
     </div>
   </div>
 </div>
@@ -232,7 +235,6 @@ header h1 { color: #4db8ff; font-size: 1rem; letter-spacing: 3px; font-weight: 6
 <script>
 const API = '';
 
-// ── Storage ───────────────────────────────────────────────────────────────────
 function loadSessions() {
   try { return JSON.parse(localStorage.getItem('jarvis_sessions') || '[]'); }
   catch(e) { return []; }
@@ -250,7 +252,6 @@ function currentSession() {
   return sessions.find(s => s.id === currentId) || null;
 }
 
-// ── Session management ────────────────────────────────────────────────────────
 function newChat() {
   const s = { id: Date.now(), title: 'New Chat', messages: [] };
   sessions.unshift(s);
@@ -289,7 +290,6 @@ function renderHistory() {
   `).join('');
 }
 
-// ── Chat render ───────────────────────────────────────────────────────────────
 function renderChat() {
   const win = document.getElementById('chat-window');
   const sess = currentSession();
@@ -299,10 +299,10 @@ function renderChat() {
         <h2>JARVIS MARK 5</h2>
         <p>What can I help you with today, sir?</p>
         <div class="chips">
-          <div class="chip" onclick="quickSend('What is the current SOL price?')">◎ SOL Price</div>
-          <div class="chip" onclick="quickSend('Generate a Python Raydium trading bot')">💻 Generate Bot</div>
-          <div class="chip" onclick="quickSend('Search the web for Solana DeFi news today')">🔍 Search Web</div>
-          <div class="chip" onclick="quickSend('What do you remember about me?')">🧠 My Memory</div>
+          <div class="chip" onclick="quickSend('/sol')">◎ SOL Price</div>
+          <div class="chip" onclick="quickSend('/screenshot https://dexscreener.com')">📸 DexScreener</div>
+          <div class="chip" onclick="quickSend('/search Solana DeFi news today')">🔍 Search Web</div>
+          <div class="chip" onclick="quickSend('/recall')">🧠 My Memory</div>
           <div class="chip" onclick="quickSend('What can you do?')">⚡ Capabilities</div>
         </div>
       </div>`;
@@ -318,10 +318,17 @@ function renderChat() {
 }
 
 function formatMsg(text) {
+  if (text.includes('__IMG__')) {
+    const parts = text.split('__IMG__');
+    const b64 = parts[1];
+    const textPart = escHtml(parts[0]);
+    return `${textPart}<br><img src="data:image/png;base64,${b64}" style="max-width:100%;border-radius:6px;margin-top:0.5rem;border:1px solid #1e2d3d">`;
+  }
   text = escHtml(text);
   text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre>$1</pre>');
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
   text = text.replace(/\*\*(.*?)\*\*/g, '<strong style="color:#e0e0e0">$1</strong>');
+  text = text.replace(/\*([^*]+)\*/g, '<em style="color:#8892a4">$1</em>');
   text = text.replace(/\n/g, '<br>');
   return text;
 }
@@ -332,7 +339,6 @@ function escHtml(t) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Send message ──────────────────────────────────────────────────────────────
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 }
@@ -387,7 +393,12 @@ async function sendChat() {
       body: JSON.stringify({ message: msg, user_id: 1 })
     });
     const data = await r.json();
-    sess.messages.push({ role: 'jarvis', content: data.reply || data.detail || 'No response.' });
+
+    if (data.type === 'screenshot' && data.image_b64) {
+      sess.messages.push({ role: 'jarvis', content: data.reply + '__IMG__' + data.image_b64 });
+    } else {
+      sess.messages.push({ role: 'jarvis', content: data.reply || data.detail || 'No response.' });
+    }
   } catch(e) {
     sess.messages.push({ role: 'jarvis', content: '❌ Connection error.' });
   }
@@ -395,9 +406,9 @@ async function sendChat() {
   saveSessions();
   document.getElementById('send-btn').disabled = false;
   renderChat();
+  document.getElementById('chat-window').scrollTop = document.getElementById('chat-window').scrollHeight;
 }
 
-// ── Data loaders ──────────────────────────────────────────────────────────────
 async function fetchJSON(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); }
   catch(e) { return null; }
@@ -451,7 +462,6 @@ async function forgetMem(key) {
   loadMemory();
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
 renderHistory();
 renderChat();
 document.getElementById('stat-chats').textContent = sessions.length;
