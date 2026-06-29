@@ -18,9 +18,9 @@ def _init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS bot_status (
-                bot_name  TEXT PRIMARY KEY,
-                status    TEXT,
-                last_pnl  TEXT,
+                bot_name   TEXT PRIMARY KEY,
+                status     TEXT,
+                last_pnl   TEXT,
                 updated_at TEXT
             );
             CREATE TABLE IF NOT EXISTS memories (
@@ -90,7 +90,6 @@ def forget(user_id: int, key: str) -> dict:
 
 
 def get_context(user_id: int) -> str:
-    """Return recent memories as a string to inject into system prompt."""
     result = recall(user_id)
     memories = result.get("memories", [])
     if not memories:
