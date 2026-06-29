@@ -1,15 +1,14 @@
 """
 JARVIS Mark 5 — Bob White Edition
-Entry point. Loads extensions, starts brain, starts Telegram bot.
+Entry point. Loads extensions, starts brain, starts Telegram bot + web dashboard.
 """
-
 import os
 import sys
 import logging
 import importlib
+import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
-
 load_dotenv()
 
 logging.basicConfig(
@@ -20,7 +19,6 @@ log = logging.getLogger("JARVIS")
 
 
 def load_extensions(brain):
-    """Auto-load every .py file in /extensions that has a register(brain) function."""
     ext_dir = Path(__file__).parent / "extensions"
     loaded = []
     for f in sorted(ext_dir.glob("*.py")):
@@ -47,10 +45,26 @@ async def main():
     extensions = load_extensions(brain)
     log.info(f"Loaded {len(extensions)} extensions: {extensions}")
 
+    # Wire brain into API
+    from core.api import app, set_brain
+    set_brain(brain)
+
+    # Start FastAPI
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+
+    # Start Telegram bot
     from core.telegram_bot import start_telegram_bot
-    await start_telegram_bot(brain)
+
+    log.info(f"Dashboard running on port {port}")
+
+    await asyncio.gather(
+        server.serve(),
+        start_telegram_bot(brain),
+    )
 
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
