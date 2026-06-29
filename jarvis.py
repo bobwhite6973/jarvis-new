@@ -1,5 +1,5 @@
 """
-JARVIS Mark 5 — Bob White Edition
+JARVIS Mark 5 — Bob White  Edition
 Entry point. Loads extensions, starts brain, starts Telegram bot.
 """
 
