@@ -26,8 +26,6 @@
   .chat-input input:focus { border-color: #00aaff; }
   .btn { background: #00aaff22; border: 1px solid #00aaff; color: #00aaff; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.8rem; letter-spacing: 1px; transition: all 0.2s; }
   .btn:hover { background: #00aaff44; }
-  .btn.danger { background: #ff004422; border-color: #ff0044; color: #ff0044; }
-  .btn.danger:hover { background: #ff004444; }
   .memory-list { max-height: 250px; overflow-y: auto; }
   .memory-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #1e3a5f22; font-size: 0.82rem; }
   .memory-item .key { color: #00aaff; }
@@ -50,7 +48,7 @@
   .refresh-btn { font-size: 0.7rem; color: #444; cursor: pointer; background: none; border: none; float: right; }
   .refresh-btn:hover { color: #00aaff; }
   .loading { color: #444; font-size: 0.8rem; }
-  ::-webkit-scrollbar { width: 4px; } 
+  ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: #060609; }
   ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
 </style>
@@ -64,14 +62,12 @@
 
 <div class="grid">
 
-  <!-- SOL Price -->
   <div class="card">
     <h2>◎ SOL Price <button class="refresh-btn" onclick="loadSol()">↻</button></h2>
     <div class="sol-price" id="sol-price">--</div>
     <div class="sol-label" id="sol-updated">Loading...</div>
   </div>
 
-  <!-- P&L -->
   <div class="card">
     <h2>📊 P&L Report <button class="refresh-btn" onclick="loadPnl()">↻</button></h2>
     <div class="pnl-grid">
@@ -82,19 +78,16 @@
     </div>
   </div>
 
-  <!-- Bot Status -->
   <div class="card">
     <h2>⚙️ Bot Status <button class="refresh-btn" onclick="loadStatus()">↻</button></h2>
     <div class="status-list" id="status-list"><div class="loading">Loading...</div></div>
   </div>
 
-  <!-- ARB Scanner -->
   <div class="card">
     <h2>📈 Arb Opportunities <button class="refresh-btn" onclick="loadArb()">↻</button></h2>
     <div class="arb-list" id="arb-list"><div class="loading">Loading...</div></div>
   </div>
 
-  <!-- Chat -->
   <div class="card" style="grid-column: span 2;">
     <h2>💬 Chat with JARVIS</h2>
     <div class="chat-box">
@@ -108,7 +101,6 @@
     </div>
   </div>
 
-  <!-- Memory -->
   <div class="card" style="grid-column: span 2;">
     <h2>🧠 Memory <button class="refresh-btn" onclick="loadMemory()">↻</button></h2>
     <div class="memory-list" id="memory-list"><div class="loading">Loading...</div></div>
@@ -238,7 +230,6 @@ async function checkHealth() {
   }
 }
 
-// Load everything on start
 checkHealth();
 loadSol();
 loadPnl();
@@ -246,7 +237,6 @@ loadStatus();
 loadArb();
 loadMemory();
 
-// Auto-refresh
 setInterval(loadSol, 30000);
 setInterval(loadArb, 60000);
 setInterval(checkHealth, 15000);
