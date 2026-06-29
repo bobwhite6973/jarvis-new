@@ -8,6 +8,8 @@ Commands:
   /model     — Switch LLM provider
   /voice     — Toggle voice replies on/off
   /search    — Web search
+  /remember  — Save a fact to memory
+  /recall    — Recall memories
   /clear     — Clear conversation history
   Free text  — Chat with JARVIS
   Voice msg  — JARVIS transcribes + responds
@@ -64,6 +66,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/model — Switch AI provider\n"
         "/voice — Toggle voice replies\n"
         "/search — Web search\n"
+        "/remember — Save a fact\n"
+        "/recall — Recall memories\n"
         "/clear — Clear chat history\n\n"
         "Send a voice message and I'll transcribe + respond.\n"
         "Use /voice to also get audio replies.",
@@ -184,6 +188,39 @@ async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _send_long(update, "\n\n".join(lines))
 
 
+async def cmd_remember(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    text = " ".join(ctx.args) if ctx.args else ""
+    if not text or "=" not in text:
+        await update.message.reply_text(
+            "Usage: `/remember key=value`\nExample: `/remember preferred_dex=Raydium`",
+            parse_mode="Markdown"
+        )
+        return
+    key, value = text.split("=", 1)
+    result = _brain.run_tool("remember", user_id=uid, key=key.strip(), value=value.strip())
+    await update.message.reply_text(f"✅ {result.get('message', 'Saved.')}")
+
+
+async def cmd_recall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    query = " ".join(ctx.args) if ctx.args else ""
+    result = _brain.run_tool("recall", user_id=uid, query=query)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    memories = result.get("memories", [])
+    if not memories:
+        await update.message.reply_text("No memories found.")
+        return
+    lines = ["*🧠 JARVIS Memory*\n"]
+    for m in memories:
+        lines.append(f"• *{m['key']}*: {m['value']}")
+    await _send_long(update, "\n".join(lines))
+
+
 # ── Message handlers ───────────────────────────────────────────────────────────
 
 async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
@@ -243,6 +280,10 @@ async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         intent = "default"
 
+    mem_context = _brain.run_tool("get_memory_context", user_id=uid)
+    if mem_context and isinstance(mem_context, str):
+        transcript = f"{mem_context}\n\nUser message: {transcript}"
+
     reply = _brain.chat(uid, transcript, intent=intent)
     await _reply_with_voice(update, ctx, reply, uid)
 
@@ -277,6 +318,10 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         intent = "genbot"
     else:
         intent = "default"
+
+    mem_context = _brain.run_tool("get_memory_context", user_id=uid)
+    if mem_context and isinstance(mem_context, str):
+        text = f"{mem_context}\n\nUser message: {text}"
 
     reply = _brain.chat(uid, text, intent=intent)
     await _reply_with_voice(update, ctx, reply, uid)
@@ -337,15 +382,17 @@ async def start_telegram_bot(brain):
 
     app = Application.builder().token(token).build()
 
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("arb",     cmd_arb))
-    app.add_handler(CommandHandler("pnl",     cmd_pnl))
-    app.add_handler(CommandHandler("status",  cmd_status))
-    app.add_handler(CommandHandler("genbot",  cmd_genbot))
-    app.add_handler(CommandHandler("model",   cmd_model))
-    app.add_handler(CommandHandler("voice",   cmd_voice))
-    app.add_handler(CommandHandler("search",  cmd_search))
-    app.add_handler(CommandHandler("clear",   cmd_clear))
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("arb",      cmd_arb))
+    app.add_handler(CommandHandler("pnl",      cmd_pnl))
+    app.add_handler(CommandHandler("status",   cmd_status))
+    app.add_handler(CommandHandler("genbot",   cmd_genbot))
+    app.add_handler(CommandHandler("model",    cmd_model))
+    app.add_handler(CommandHandler("voice",    cmd_voice))
+    app.add_handler(CommandHandler("search",   cmd_search))
+    app.add_handler(CommandHandler("remember", cmd_remember))
+    app.add_handler(CommandHandler("recall",   cmd_recall))
+    app.add_handler(CommandHandler("clear",    cmd_clear))
     app.add_handler(CallbackQueryHandler(cb_model, pattern="^model:"))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
