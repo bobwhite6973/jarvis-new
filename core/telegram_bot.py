@@ -316,4 +316,12 @@ async def start_telegram_bot(brain):
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     log.info("Telegram bot running...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # Use async context manager — compatible with Python 3.14 and existing event loops
+    async with app:
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        # Run forever until interrupted
+        await asyncio.Event().wait()
+        await app.updater.stop()
+        await app.stop()
