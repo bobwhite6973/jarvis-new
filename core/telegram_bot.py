@@ -1,5 +1,5 @@
 """
-JARVIS Telegram Bot
+jARVIS Telegram Bot
 Commands:
   /arb       — Solana cross-DEX spread scan
   /pnl       — Today's P&L report
