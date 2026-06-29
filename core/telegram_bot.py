@@ -15,6 +15,7 @@ Commands:
   /fix       — Fix broken code
   /improve   — Improve code
   /explain   — Explain code
+  /sol       — Live SOL price
   /clear     — Clear conversation history
   Free text  — Chat with JARVIS
   Voice msg  — JARVIS transcribes + responds
@@ -78,6 +79,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/fix — Fix broken code\n"
         "/improve — Improve code\n"
         "/explain — Explain code\n"
+        "/sol — Live SOL price\n"
         "/clear — Clear chat history\n\n"
         "Send a voice message and I'll transcribe + respond.\n"
         "Use /voice to also get audio replies.",
@@ -313,6 +315,20 @@ async def cmd_explain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _send_long(update, result)
 
 
+async def cmd_sol(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    await update.message.reply_text("◎ Fetching SOL price...")
+    result = _brain.run_tool("sol_price")
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    await update.message.reply_text(
+        f"◎ *SOL Price*: `${result['price']:,.2f}`",
+        parse_mode="Markdown"
+    )
+
+
 # ── Message handlers ───────────────────────────────────────────────────────────
 
 async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
@@ -488,6 +504,7 @@ async def start_telegram_bot(brain):
     app.add_handler(CommandHandler("fix",      cmd_fix))
     app.add_handler(CommandHandler("improve",  cmd_improve))
     app.add_handler(CommandHandler("explain",  cmd_explain))
+    app.add_handler(CommandHandler("sol",      cmd_sol))
     app.add_handler(CommandHandler("clear",    cmd_clear))
     app.add_handler(CallbackQueryHandler(cb_model, pattern="^model:"))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
