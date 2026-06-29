@@ -48,7 +48,7 @@ class TelegramBot:
         if not self._allowed(update):
             return await self._deny(update)
         await update.message.reply_text(
-            "JARVIS Commands\n\n/model - switch LLM provider\n/clear - clear conversation history\n/status - all bot statuses\n/pnl - today P&L summary\n/arb - current Solana arb spreads\n/genbot description - scaffold a new trading bot\n/help - this menu"
+            "JARVIS Commands\n\n/model - switch LLM provider\n/clear - clear conversation history\n/status - all bot statuses\n/pnl - today P&L summary\n/arb - current Solana arb spreads\n/genbot - generate a trading bot from description"
         )
 
     async def cmd_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
