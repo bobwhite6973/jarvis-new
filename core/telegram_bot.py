@@ -1,30 +1,33 @@
 """
 JARVIS Telegram Bot
 Commands:
-  /arb       — Solana cross-DEX spread scan
-  /pnl       — Today's P&L report
-  /status    — Bot status
-  /genbot    — Generate a new trading bot
-  /model     — Switch LLM provider
-  /voice     — Toggle voice replies on/off
-  /search    — Web search
-  /browse    — Browse any URL
-  /github    — Read your GitHub repos
-  /remember  — Save a fact to memory
-  /recall    — Recall memories
-  /code      — Generate code
-  /review    — Review code
-  /fix       — Fix broken code
-  /improve   — Improve code
-  /explain   — Explain code
-  /sol       — Live SOL price
-  /clear     — Clear conversation history
-  Free text  — Chat with JARVIS
-  Voice msg  — JARVIS transcribes + responds
+  /arb        — Solana cross-DEX spread scan
+  /pnl        — Today's P&L report
+  /status     — Bot status
+  /genbot     — Generate a new trading bot
+  /model      — Switch LLM provider
+  /voice      — Toggle voice replies on/off
+  /search     — Web search
+  /browse     — Browse any URL
+  /browser    — Full browser render of any URL
+  /screenshot — Screenshot any webpage
+  /github     — Read your GitHub repos
+  /remember   — Save a fact to memory
+  /recall     — Recall memories
+  /code       — Generate code
+  /review     — Review code
+  /fix        — Fix broken code
+  /improve    — Improve code
+  /explain    — Explain code
+  /sol        — Live SOL price
+  /clear      — Clear conversation history
+  Free text   — Chat with JARVIS
+  Voice msg   — JARVIS transcribes + responds
 """
 
 import os
 import io
+import base64
 import logging
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -75,6 +78,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/voice — Toggle voice replies\n"
         "/search — Web search\n"
         "/browse — Browse any URL\n"
+        "/browser — Full browser render\n"
+        "/screenshot — Screenshot any webpage\n"
         "/github — Read your GitHub repos\n"
         "/remember — Save a fact\n"
         "/recall — Recall memories\n"
@@ -218,6 +223,41 @@ async def cmd_browse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     summary = _brain.chat(uid, f"Summarize this webpage content concisely:\n\n{result['content']}")
     await _send_long(update, f"🌐 *{url}*\n\n{summary}")
+
+
+async def cmd_browser(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/browser <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🌐 Rendering: {url}...")
+    result = _brain.run_tool("browser_fetch", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    summary = _brain.chat(uid, f"Summarize this fully rendered webpage concisely:\n\n{result['content']}")
+    await _send_long(update, f"🌐 *{url}*\n\n{summary}")
+
+
+async def cmd_screenshot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/screenshot <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"📸 Taking screenshot of {url}...")
+    result = _brain.run_tool("browser_screenshot", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    img_bytes = base64.b64decode(result["screenshot_b64"])
+    buf = io.BytesIO(img_bytes)
+    buf.name = "screenshot.png"
+    buf.seek(0)
+    await ctx.bot.send_photo(chat_id=update.effective_chat.id, photo=buf, caption=url)
 
 
 async def cmd_github(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -583,25 +623,27 @@ async def start_telegram_bot(brain):
 
     app = Application.builder().token(token).build()
 
-    app.add_handler(CommandHandler("start",    cmd_start))
-    app.add_handler(CommandHandler("arb",      cmd_arb))
-    app.add_handler(CommandHandler("pnl",      cmd_pnl))
-    app.add_handler(CommandHandler("status",   cmd_status))
-    app.add_handler(CommandHandler("genbot",   cmd_genbot))
-    app.add_handler(CommandHandler("model",    cmd_model))
-    app.add_handler(CommandHandler("voice",    cmd_voice))
-    app.add_handler(CommandHandler("search",   cmd_search))
-    app.add_handler(CommandHandler("browse",   cmd_browse))
-    app.add_handler(CommandHandler("github",   cmd_github))
-    app.add_handler(CommandHandler("remember", cmd_remember))
-    app.add_handler(CommandHandler("recall",   cmd_recall))
-    app.add_handler(CommandHandler("code",     cmd_code))
-    app.add_handler(CommandHandler("review",   cmd_review))
-    app.add_handler(CommandHandler("fix",      cmd_fix))
-    app.add_handler(CommandHandler("improve",  cmd_improve))
-    app.add_handler(CommandHandler("explain",  cmd_explain))
-    app.add_handler(CommandHandler("sol",      cmd_sol))
-    app.add_handler(CommandHandler("clear",    cmd_clear))
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("arb",        cmd_arb))
+    app.add_handler(CommandHandler("pnl",        cmd_pnl))
+    app.add_handler(CommandHandler("status",     cmd_status))
+    app.add_handler(CommandHandler("genbot",     cmd_genbot))
+    app.add_handler(CommandHandler("model",      cmd_model))
+    app.add_handler(CommandHandler("voice",      cmd_voice))
+    app.add_handler(CommandHandler("search",     cmd_search))
+    app.add_handler(CommandHandler("browse",     cmd_browse))
+    app.add_handler(CommandHandler("browser",    cmd_browser))
+    app.add_handler(CommandHandler("screenshot", cmd_screenshot))
+    app.add_handler(CommandHandler("github",     cmd_github))
+    app.add_handler(CommandHandler("remember",   cmd_remember))
+    app.add_handler(CommandHandler("recall",     cmd_recall))
+    app.add_handler(CommandHandler("code",       cmd_code))
+    app.add_handler(CommandHandler("review",     cmd_review))
+    app.add_handler(CommandHandler("fix",        cmd_fix))
+    app.add_handler(CommandHandler("improve",    cmd_improve))
+    app.add_handler(CommandHandler("explain",    cmd_explain))
+    app.add_handler(CommandHandler("sol",        cmd_sol))
+    app.add_handler(CommandHandler("clear",      cmd_clear))
     app.add_handler(CallbackQueryHandler(cb_model, pattern="^model:"))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
