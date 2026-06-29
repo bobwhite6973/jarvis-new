@@ -12,6 +12,7 @@ Commands:
   /browser    — Full browser render of any URL
   /screenshot — Screenshot any webpage
   /github     — Read your GitHub repos
+  /audit      — Full repo code audit
   /remember   — Save a fact to memory
   /recall     — Recall memories
   /code       — Generate code
@@ -81,6 +82,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/browser — Full browser render\n"
         "/screenshot — Screenshot any webpage\n"
         "/github — Read your GitHub repos\n"
+        "/audit — Full repo code audit\n"
         "/remember — Save a fact\n"
         "/recall — Recall memories\n"
         "/code — Generate code\n"
@@ -333,6 +335,29 @@ async def cmd_github(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     else:
         await update.message.reply_text("❌ Unknown command. Try `/github` for usage.", parse_mode="Markdown")
+
+
+async def cmd_audit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    repo = " ".join(ctx.args) if ctx.args else ""
+    if not repo:
+        await update.message.reply_text(
+            "Usage: `/audit <repo>`\nExample: `/audit jarvis-new`",
+            parse_mode="Markdown"
+        )
+        return
+    await update.message.reply_text(
+        f"🔍 Auditing `{repo}`... reading files and analyzing code. This may take a minute.",
+        parse_mode="Markdown"
+    )
+    result = _brain.run_tool("audit_repo", repo=repo)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    header = f"*🔍 Audit Report: {repo}*\n_{result['files_audited']} files reviewed_\n\n"
+    full_report = header + "\n\n---\n\n".join(result["report"])
+    await _send_long(update, full_report)
 
 
 async def cmd_remember(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -627,6 +652,7 @@ async def start_telegram_bot(brain):
     app.add_handler(CommandHandler("browser",    cmd_browser))
     app.add_handler(CommandHandler("screenshot", cmd_screenshot))
     app.add_handler(CommandHandler("github",     cmd_github))
+    app.add_handler(CommandHandler("audit",      cmd_audit))
     app.add_handler(CommandHandler("remember",   cmd_remember))
     app.add_handler(CommandHandler("recall",     cmd_recall))
     app.add_handler(CommandHandler("code",       cmd_code))
