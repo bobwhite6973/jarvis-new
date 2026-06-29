@@ -1,184 +1,650 @@
 """
-Telegram Bot - Mobile-first UI for JARVIS
-Commands: /start /help /model /clear /status /pnl /arb /genbot /remember /recall
+JARVIS Telegram Bot
+Commands:
+  /arb        — Solana cross-DEX spread scan
+  /pnl        — Today's P&L report
+  /status     — Bot status
+  /genbot     — Generate a new trading bot
+  /model      — Switch LLM provider
+  /voice      — Toggle voice replies on/off
+  /search     — Web search
+  /browse     — Browse any URL
+  /browser    — Full browser render of any URL
+  /screenshot — Screenshot any webpage
+  /github     — Read your GitHub repos
+  /remember   — Save a fact to memory
+  /recall     — Recall memories
+  /code       — Generate code
+  /review     — Review code
+  /fix        — Fix broken code
+  /improve    — Improve code
+  /explain    — Explain code
+  /sol        — Live SOL price
+  /clear      — Clear conversation history
+  Free text   — Chat with JARVIS
+  Voice msg   — JARVIS transcribes + responds
 """
 
 import os
+import io
+import base64
 import logging
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters, ContextTypes
+    CallbackQueryHandler, ContextTypes, filters
 )
-from core.brain import Brain, PROVIDERS
 
-log = logging.getLogger("jarvis.telegram")
+log = logging.getLogger("telegram_bot")
+
+ALLOWED_USERS = set(
+    int(x) for x in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",") if x.strip()
+)
+
+_brain = None
+_voice_users: set = set()
 
 
-class TelegramBot:
-    def __init__(self, brain: Brain):
-        self.brain = brain
-        self.token = os.environ["TELEGRAM_BOT_TOKEN"]
-        raw = os.environ.get("ALLOWED_USER_IDS", "")
-        self.allowed_ids = set(int(x.strip()) for x in raw.split(",") if x.strip())
+def _check_auth(user_id: int) -> bool:
+    if not ALLOWED_USERS:
+        return True
+    return user_id in ALLOWED_USERS
 
-    def _uid(self, update: Update) -> str:
-        return str(update.effective_user.id)
 
-    def _allowed(self, update: Update) -> bool:
-        if not self.allowed_ids:
-            return True
-        return update.effective_user.id in self.allowed_ids
+async def _send_long(update: Update, text: str):
+    if len(text) <= 4096:
+        await update.message.reply_text(text, parse_mode="Markdown")
+        return
+    chunks = [text[i:i+4096] for i in range(0, len(text), 4096)]
+    for chunk in chunks:
+        await update.message.reply_text(chunk, parse_mode="Markdown")
 
-    async def _deny(self, update: Update):
-        await update.message.reply_text("Unauthorized.")
 
-    async def cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        name = update.effective_user.first_name
-        available = self.brain.available_providers()
-        provider = self.brain.get_user_provider(self._uid(update))
+# ── Command handlers ───────────────────────────────────────────────────────────
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid):
+        await update.message.reply_text("🚫 Unauthorized.")
+        return
+    await update.message.reply_text(
+        "⚙️ *JARVIS Mark 5 online.*\n\n"
+        "/arb — Solana spread scan\n"
+        "/pnl — P&L report\n"
+        "/status — Bot status\n"
+        "/genbot — Generate a trading bot\n"
+        "/model — Switch AI provider\n"
+        "/voice — Toggle voice replies\n"
+        "/search — Web search\n"
+        "/browse — Browse any URL\n"
+        "/browser — Full browser render\n"
+        "/screenshot — Screenshot any webpage\n"
+        "/github — Read your GitHub repos\n"
+        "/remember — Save a fact\n"
+        "/recall — Recall memories\n"
+        "/code — Generate code\n"
+        "/review — Review code\n"
+        "/fix — Fix broken code\n"
+        "/improve — Improve code\n"
+        "/explain — Explain code\n"
+        "/sol — Live SOL price\n"
+        "/clear — Clear chat history\n\n"
+        "Send a voice message and I'll transcribe + respond.\n"
+        "Use /voice to also get audio replies.",
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_arb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    await update.message.reply_text("🔍 Scanning DEX spreads...")
+    result = _brain.run_tool("solana_market")
+    await _send_long(update, _format_arb(result))
+
+
+async def cmd_pnl(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    await update.message.reply_text("📊 Fetching P&L...")
+    result = _brain.run_tool("pnl_report")
+    await _send_long(update, _format_pnl(result))
+
+
+async def cmd_status(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    result = _brain.run_tool("bot_status")
+    await _send_long(update, _format_status(result))
+
+
+async def cmd_genbot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    desc = " ".join(ctx.args) if ctx.args else ""
+    if not desc:
         await update.message.reply_text(
-            f"JARVIS online, {name}.\n\nActive model: {PROVIDERS[provider]['label']}\nAvailable: {', '.join(available)}\n\nType anything to talk. Use /help for commands."
+            "Usage: `/genbot <description>`\nExample: `/genbot SOL/USDC arb bot using Raydium and Orca`",
+            parse_mode="Markdown"
         )
+        return
+    await update.message.reply_text("🤖 Generating bot... (may take up to 60s)")
+    result = _brain.run_tool("bot_generator", description=desc)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    await _send_long(update, f"```python\n{result.get('code', '')}\n```")
 
-    async def cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
+
+async def cmd_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    keyboard = [
+        [
+            InlineKeyboardButton("🧠 Claude (default)", callback_data="model:claude"),
+            InlineKeyboardButton("⚡ Groq (fast)", callback_data="model:groq"),
+        ],
+        [InlineKeyboardButton("🔮 OpenAI GPT-4o", callback_data="model:openai")],
+    ]
+    await update.message.reply_text(
+        "Choose AI provider:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def cb_model(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    if not _check_auth(uid): return
+    provider = query.data.split(":")[1]
+    try:
+        _brain.set_provider(uid, provider)
+        await query.edit_message_text(f"✅ Provider set to *{provider}*", parse_mode="Markdown")
+    except ValueError as e:
+        await query.edit_message_text(f"❌ {e}")
+
+
+async def cmd_clear(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    _brain.clear_history(uid)
+    await update.message.reply_text("🗑️ Conversation history cleared.")
+
+
+async def cmd_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    if uid in _voice_users:
+        _voice_users.discard(uid)
+        await update.message.reply_text("🔇 Voice replies *off*.", parse_mode="Markdown")
+    else:
+        _voice_users.add(uid)
+        await update.message.reply_text("🔊 Voice replies *on*.", parse_mode="Markdown")
+
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    query = " ".join(ctx.args) if ctx.args else ""
+    if not query:
+        await update.message.reply_text("Usage: `/search <query>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🔍 Searching: _{query}_...", parse_mode="Markdown")
+    result = _brain.run_tool("web_search", query=query)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    lines = [f"*🔍 Results for:* `{query}`\n"]
+    for r in result.get("results", []):
+        lines.append(f"• [{r['title']}]({r['url']})\n  _{r['snippet'][:120]}_")
+    if not result.get("results"):
+        lines.append("No results found.")
+    await _send_long(update, "\n\n".join(lines))
+
+
+async def cmd_browse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/browse <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🌐 Fetching: {url}...")
+    result = _brain.run_tool("browse", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    summary = _brain.chat(uid, f"Summarize this webpage content concisely:\n\n{result['content']}")
+    await _send_long(update, f"🌐 *{url}*\n\n{summary}")
+
+
+async def cmd_browser(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/browser <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🌐 Rendering: {url}...")
+    result = _brain.run_tool("browser_fetch", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    summary = _brain.chat(uid, f"Summarize this fully rendered webpage concisely:\n\n{result['content']}")
+    await _send_long(update, f"🌐 *{url}*\n\n{summary}")
+
+
+async def cmd_screenshot(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/screenshot <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"📸 Taking screenshot of {url}...")
+    result = _brain.run_tool("browser_screenshot", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    img_bytes = base64.b64decode(result["screenshot_b64"])
+    buf = io.BytesIO(img_bytes)
+    buf.name = "screenshot.png"
+    buf.seek(0)
+    await ctx.bot.send_photo(chat_id=update.effective_chat.id, photo=buf, caption=url)
+
+
+async def cmd_github(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    args = ctx.args if ctx.args else []
+    if not args:
         await update.message.reply_text(
-            "JARVIS Commands\n\n"
-            "/model - switch LLM provider\n"
-            "/clear - clear conversation history\n"
-            "/status - all bot statuses\n"
-            "/pnl - today P&L summary\n"
-            "/arb - current Solana arb spreads\n"
-            "/genbot description - scaffold a new trading bot\n"
-            "/remember key = value - store something permanently\n"
-            "/recall key - retrieve stored value\n"
-            "/recall - list all stored keys\n"
-            "/help - this menu"
+            "Usage:\n"
+            "`/github repos` — list your repos\n"
+            "`/github files <repo>` — list files\n"
+            "`/github read <repo> <path>` — read a file\n"
+            "`/github commits <repo>` — recent commits\n"
+            "`/github search <query>` — search your code",
+            parse_mode="Markdown"
         )
+        return
 
-    async def cmd_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        available = self.brain.available_providers()
-        current = self.brain.get_user_provider(self._uid(update))
-        buttons = []
-        for p in available:
-            label = PROVIDERS[p]["label"]
-            tick = "OK " if p == current else ""
-            buttons.append([InlineKeyboardButton(f"{tick}{label}", callback_data=f"model:{p}")])
-        await update.message.reply_text("Choose your LLM provider:", reply_markup=InlineKeyboardMarkup(buttons))
+    cmd = args[0].lower()
 
-    async def cb_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-        provider = query.data.split(":")[1]
-        uid = str(query.from_user.id)
-        result = self.brain.set_user_provider(uid, provider)
-        await query.edit_message_text(result)
-
-    async def cmd_clear(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        self.brain.clear_history(self._uid(update))
-        await update.message.reply_text("Conversation history cleared. Persistent memory kept.")
-
-    async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        statuses = self.brain.get_all_bot_statuses()
-        if not statuses:
-            await update.message.reply_text("No bots registered yet.")
+    if cmd == "repos":
+        result = _brain.run_tool("list_repos")
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
             return
-        lines = ["Bot Status\n"]
-        for b in statuses:
-            icon = "ON" if b["status"] == "running" else "OFF"
-            pnl = f"  PnL: {b['pnl']:+.4f} SOL" if b["pnl"] is not None else ""
-            lines.append(f"{icon} {b['name']} - {b['status']}{pnl}")
-        await update.message.reply_text("\n".join(lines))
+        lines = ["*📁 Your Repos*\n"]
+        for r in result["repos"]:
+            icon = "🔒" if r["private"] else "📂"
+            desc = f" — {r['description']}" if r.get("description") else ""
+            lines.append(f"{icon} *{r['name']}*{desc}")
+        await _send_long(update, "\n".join(lines))
 
-    async def cmd_pnl(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        msg = await update.message.reply_text("Fetching P&L...")
-        response = await self.brain.think(self._uid(update), "show me today's PnL report")
-        await msg.edit_text(response)
-
-    async def cmd_arb(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        msg = await update.message.reply_text("Scanning for arb spreads...")
-        response = await self.brain.think(self._uid(update), "show current arbitrage spreads")
-        await msg.edit_text(response)
-
-    async def cmd_genbot(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        args = " ".join(ctx.args) if ctx.args else ""
-        if not args:
-            await update.message.reply_text("Usage: /genbot description\nExample: /genbot Solana momentum bot using RSI on JUP/USDC")
+    elif cmd == "files" and len(args) >= 2:
+        repo = args[1]
+        path = args[2] if len(args) > 2 else ""
+        result = _brain.run_tool("list_files", repo=repo, path=path)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
             return
-        msg = await update.message.reply_text("Scaffolding bot...")
-        response = await self.brain.think(self._uid(update), f"generate bot: {args}")
-        for chunk in self._split(response):
-            await update.message.reply_text(chunk)
-        await msg.delete()
+        lines = [f"*📁 {repo}/{result['path']}*\n"]
+        for f in result["items"]:
+            icon = "📁" if f["type"] == "dir" else "📄"
+            lines.append(f"{icon} {f['name']}")
+        await _send_long(update, "\n".join(lines))
 
-    async def cmd_remember(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        args = " ".join(ctx.args) if ctx.args else ""
-        if not args:
-            await update.message.reply_text("Usage: /remember key = value\nExample: /remember groq model = llama-3.3-70b")
+    elif cmd == "read" and len(args) >= 3:
+        repo = args[1]
+        path = args[2]
+        result = _brain.run_tool("get_file", repo=repo, path=path)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
             return
-        response = await self.brain.think(self._uid(update), f"remember {args}")
-        await update.message.reply_text(response)
+        await _send_long(update, f"*📄 {repo}/{path}*\n\n```\n{result['content']}\n```")
 
-    async def cmd_recall(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        args = " ".join(ctx.args) if ctx.args else ""
-        response = await self.brain.think(self._uid(update), f"recall {args}")
-        await update.message.reply_text(response)
+    elif cmd == "commits" and len(args) >= 2:
+        repo = args[1]
+        result = _brain.run_tool("get_commits", repo=repo)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = [f"*📝 Recent commits: {repo}*\n"]
+        for c in result["commits"]:
+            lines.append(f"`{c['sha']}` {c['message']} — _{c['author']}_")
+        await _send_long(update, "\n".join(lines))
 
-    async def handle_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if not self._allowed(update):
-            return await self._deny(update)
-        user_text = update.message.text.strip()
-        await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
-        response = await self.brain.think(self._uid(update), user_text)
-        for chunk in self._split(response):
-            await update.message.reply_text(chunk)
+    elif cmd == "search" and len(args) >= 2:
+        query = " ".join(args[1:])
+        result = _brain.run_tool("search_code", query=query)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = [f"*🔍 Code search: {query}*\n"]
+        for r in result["results"]:
+            lines.append(f"• *{r['repo']}* — `{r['path']}`")
+        if not result["results"]:
+            lines.append("No results found.")
+        await _send_long(update, "\n".join(lines))
 
-    def _split(self, text: str, limit: int = 4000) -> list[str]:
-        if len(text) <= limit:
-            return [text]
-        chunks = []
-        while text:
-            chunks.append(text[:limit])
-            text = text[limit:]
-        return chunks
+    else:
+        await update.message.reply_text("❌ Unknown command. Try `/github` for usage.", parse_mode="Markdown")
 
-    async def run(self):
-        app = Application.builder().token(self.token).build()
-        app.add_handler(CommandHandler("start", self.cmd_start))
-        app.add_handler(CommandHandler("help", self.cmd_help))
-        app.add_handler(CommandHandler("model", self.cmd_model))
-        app.add_handler(CommandHandler("clear", self.cmd_clear))
-        app.add_handler(CommandHandler("status", self.cmd_status))
-        app.add_handler(CommandHandler("pnl", self.cmd_pnl))
-        app.add_handler(CommandHandler("arb", self.cmd_arb))
-        app.add_handler(CommandHandler("genbot", self.cmd_genbot))
-        app.add_handler(CommandHandler("remember", self.cmd_remember))
-        app.add_handler(CommandHandler("recall", self.cmd_recall))
-        app.add_handler(CallbackQueryHandler(self.cb_model, pattern="^model:"))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        log.info("Telegram bot polling...")
-        async with app:
-            await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
-            await asyncio.Event().wait()
+
+async def cmd_remember(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    text = " ".join(ctx.args) if ctx.args else ""
+    if not text or "=" not in text:
+        await update.message.reply_text(
+            "Usage: `/remember key=value`\nExample: `/remember preferred_dex=Raydium`",
+            parse_mode="Markdown"
+        )
+        return
+    key, value = text.split("=", 1)
+    result = _brain.run_tool("remember", user_id=uid, key=key.strip(), value=value.strip())
+    await update.message.reply_text(f"✅ {result.get('message', 'Saved.')}")
+
+
+async def cmd_recall(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    query = " ".join(ctx.args) if ctx.args else ""
+    result = _brain.run_tool("recall", user_id=uid, query=query)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    memories = result.get("memories", [])
+    if not memories:
+        await update.message.reply_text("No memories found.")
+        return
+    lines = ["*🧠 JARVIS Memory*\n"]
+    for m in memories:
+        lines.append(f"• *{m['key']}*: {m['value']}")
+    await _send_long(update, "\n".join(lines))
+
+
+async def cmd_code(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    desc = " ".join(ctx.args) if ctx.args else ""
+    if not desc:
+        await update.message.reply_text(
+            "Usage: `/code <description>`\nExample: `/code async Python function to fetch SOL price`",
+            parse_mode="Markdown"
+        )
+        return
+    await update.message.reply_text("💻 Generating code...")
+    result = _brain.run_tool("generate_code", user_id=uid, description=desc)
+    await _send_long(update, f"```\n{result}\n```")
+
+
+async def cmd_review(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    code = " ".join(ctx.args) if ctx.args else ""
+    if not code:
+        await update.message.reply_text("Usage: `/review <code>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text("🔍 Reviewing code...")
+    result = _brain.run_tool("review_code", user_id=uid, code=code)
+    await _send_long(update, result)
+
+
+async def cmd_fix(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    text = " ".join(ctx.args) if ctx.args else ""
+    if not text or "---" not in text:
+        await update.message.reply_text(
+            "Usage: `/fix <code> --- <error>`",
+            parse_mode="Markdown"
+        )
+        return
+    parts = text.split("---", 1)
+    code, error = parts[0].strip(), parts[1].strip()
+    await update.message.reply_text("🔧 Fixing code...")
+    result = _brain.run_tool("fix_code", user_id=uid, code=code, error=error)
+    await _send_long(update, f"```\n{result}\n```")
+
+
+async def cmd_improve(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    text = " ".join(ctx.args) if ctx.args else ""
+    if not text:
+        await update.message.reply_text(
+            "Usage: `/improve <code>` or `/improve <code> --- <goal>`",
+            parse_mode="Markdown"
+        )
+        return
+    if "---" in text:
+        parts = text.split("---", 1)
+        code, goal = parts[0].strip(), parts[1].strip()
+    else:
+        code, goal = text, ""
+    await update.message.reply_text("⚡ Improving code...")
+    result = _brain.run_tool("improve_code", user_id=uid, code=code, goal=goal)
+    await _send_long(update, f"```\n{result}\n```")
+
+
+async def cmd_explain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    code = " ".join(ctx.args) if ctx.args else ""
+    if not code:
+        await update.message.reply_text("Usage: `/explain <code>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text("📖 Explaining code...")
+    result = _brain.run_tool("explain_code", user_id=uid, code=code)
+    await _send_long(update, result)
+
+
+async def cmd_sol(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    await update.message.reply_text("◎ Fetching SOL price...")
+    result = _brain.run_tool("sol_price")
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    await update.message.reply_text(
+        f"◎ *SOL Price*: `${result['price']:,.2f}`",
+        parse_mode="Markdown"
+    )
+
+
+# ── Message handlers ───────────────────────────────────────────────────────────
+
+async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
+    await _send_long(update, text)
+    if uid in _voice_users:
+        try:
+            await ctx.bot.send_chat_action(update.effective_chat.id, "record_voice")
+            audio = _brain.run_tool("speak", text=text)
+            if isinstance(audio, bytes) and len(audio) > 0:
+                buf = io.BytesIO(audio)
+                buf.name = "jarvis.ogg"
+                buf.seek(0)
+                await ctx.bot.send_voice(chat_id=update.effective_chat.id, voice=buf)
+        except Exception as e:
+            log.warning(f"TTS failed: {e}")
+
+
+async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid):
+        await update.message.reply_text("🚫 Unauthorized.")
+        return
+
+    await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+
+    try:
+        voice_file = await update.message.voice.get_file()
+        audio_bytes = bytes(await voice_file.download_as_bytearray())
+    except Exception as e:
+        await update.message.reply_text(f"❌ Could not download voice message: {e}")
+        return
+
+    try:
+        transcript = _brain.run_tool("transcribe", audio_bytes=audio_bytes)
+        if isinstance(transcript, dict) and "error" in transcript:
+            await update.message.reply_text(f"❌ Transcription failed: {transcript['error']}")
+            return
+        if not isinstance(transcript, str) or not transcript.strip():
+            await update.message.reply_text("❌ Could not transcribe audio — try again.")
+            return
+    except Exception as e:
+        await update.message.reply_text(f"❌ Transcription error: {e}")
+        return
+
+    await update.message.reply_text(f"🎙️ _{transcript}_", parse_mode="Markdown")
+
+    lower = transcript.lower()
+    if any(w in lower for w in ["spread", "arb", "arbitrage", "raydium", "orca"]):
+        intent = "arb"
+    elif any(w in lower for w in ["pnl", "profit", "loss", "trade"]):
+        intent = "pnl"
+    elif any(w in lower for w in ["generate", "build", "create", "make", "write"]) and "bot" in lower:
+        intent = "genbot"
+    else:
+        intent = "default"
+
+    mem_context = _brain.run_tool("get_memory_context", user_id=uid)
+    if mem_context and isinstance(mem_context, str):
+        transcript = f"{mem_context}\n\nUser message: {transcript}"
+
+    reply = _brain.chat(uid, transcript, intent=intent)
+    await _reply_with_voice(update, ctx, reply, uid)
+
+
+async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid):
+        await update.message.reply_text("🚫 Unauthorized.")
+        return
+
+    text = update.message.text or ""
+    await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
+    lower = text.lower()
+
+    if lower.startswith("search:") or lower.startswith("search "):
+        query = text.split(" ", 1)[1] if " " in text else text[7:]
+        result = _brain.run_tool("web_search", query=query)
+        reply = _brain.chat(
+            uid,
+            f"Web search results for '{query}': {result}\n\nSummarize these results clearly.",
+            intent="default"
+        )
+        await _reply_with_voice(update, ctx, reply, uid)
+        return
+
+    if any(w in lower for w in ["spread", "arb", "arbitrage", "raydium", "orca"]):
+        intent = "arb"
+    elif any(w in lower for w in ["pnl", "profit", "loss", "trade"]):
+        intent = "pnl"
+    elif any(w in lower for w in ["generate", "build", "create", "make", "write"]) and "bot" in lower:
+        intent = "genbot"
+    else:
+        intent = "default"
+
+    mem_context = _brain.run_tool("get_memory_context", user_id=uid)
+    if mem_context and isinstance(mem_context, str):
+        text = f"{mem_context}\n\nUser message: {text}"
+
+    reply = _brain.chat(uid, text, intent=intent)
+    await _reply_with_voice(update, ctx, reply, uid)
+
+
+# ── Formatters ─────────────────────────────────────────────────────────────────
+
+def _format_arb(result: dict) -> str:
+    if "error" in result:
+        return f"❌ {result['error']}"
+    lines = ["*📈 Solana DEX Spreads*\n"]
+    opps = result.get("opportunities", [])
+    if not opps:
+        return "No executable spreads found right now."
+    for o in opps[:10]:
+        flag = "✅" if o.get("executable") else "⚠️"
+        lines.append(
+            f"{flag} *{o['token']}* | {o['buy_dex']} → {o['sell_dex']}\n"
+            f"   Gross: {o.get('gross_spread_pct', 0):.2f}% | Net: {o.get('net_spread_pct', 0):.2f}% | Est: ${o.get('est_profit_usd', 0):.4f}"
+        )
+    return "\n".join(lines)
+
+
+def _format_pnl(result: dict) -> str:
+    if "error" in result:
+        return f"❌ {result['error']}"
+    return (
+        f"*📊 P&L Report*\n\n"
+        f"Today: `{result.get('today_pnl', 'N/A')}`\n"
+        f"7d:    `{result.get('week_pnl', 'N/A')}`\n"
+        f"Trades: `{result.get('trade_count', 'N/A')}`\n"
+        f"Win rate: `{result.get('win_rate', 'N/A')}`"
+    )
+
+
+def _format_status(result: dict) -> str:
+    if "error" in result:
+        return f"❌ {result['error']}"
+    bots = result.get("bots", [])
+    if not bots:
+        return "No bots registered."
+    lines = ["*⚙️ Bot Status*\n"]
+    for b in bots:
+        icon = "🟢" if b.get("status") == "running" else "🔴"
+        lines.append(f"{icon} *{b['name']}* — {b.get('status', 'unknown')}")
+    return "\n".join(lines)
+
+
+# ── Start ──────────────────────────────────────────────────────────────────────
+
+async def start_telegram_bot(brain):
+    global _brain
+    _brain = brain
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not set in .env")
+
+    app = Application.builder().token(token).build()
+
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("arb",        cmd_arb))
+    app.add_handler(CommandHandler("pnl",        cmd_pnl))
+    app.add_handler(CommandHandler("status",     cmd_status))
+    app.add_handler(CommandHandler("genbot",     cmd_genbot))
+    app.add_handler(CommandHandler("model",      cmd_model))
+    app.add_handler(CommandHandler("voice",      cmd_voice))
+    app.add_handler(CommandHandler("search",     cmd_search))
+    app.add_handler(CommandHandler("browse",     cmd_browse))
+    app.add_handler(CommandHandler("browser",    cmd_browser))
+    app.add_handler(CommandHandler("screenshot", cmd_screenshot))
+    app.add_handler(CommandHandler("github",     cmd_github))
+    app.add_handler(CommandHandler("remember",   cmd_remember))
+    app.add_handler(CommandHandler("recall",     cmd_recall))
+    app.add_handler(CommandHandler("code",       cmd_code))
+    app.add_handler(CommandHandler("review",     cmd_review))
+    app.add_handler(CommandHandler("fix",        cmd_fix))
+    app.add_handler(CommandHandler("improve",    cmd_improve))
+    app.add_handler(CommandHandler("explain",    cmd_explain))
+    app.add_handler(CommandHandler("sol",        cmd_sol))
+    app.add_handler(CommandHandler("clear",      cmd_clear))
+    app.add_handler(CallbackQueryHandler(cb_model, pattern="^model:"))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    log.info("Telegram bot running...")
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await asyncio.Event().wait()
+        await app.updater.stop()
+        await app.stop()
