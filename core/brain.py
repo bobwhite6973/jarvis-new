@@ -20,17 +20,16 @@ log = logging.getLogger("brain")
 
 PROVIDERS = ["claude", "groq", "openai"]
 
-# Intent → preferred provider mapping
 INTENT_PROVIDER = {
-    "arb":      "groq",    # fast, low-latency data
-    "pnl":      "groq",
-    "status":   "groq",
-    "genbot":   "claude",  # code quality
-    "default":  "claude",
+    "arb":     "groq",
+    "pnl":     "groq",
+    "status":  "groq",
+    "genbot":  "claude",
+    "default": "claude",
 }
 
 GROQ_MODELS = {
-    "fast": "llama-3.1-8b-instant",
+    "fast":  "llama-3.1-8b-instant",
     "smart": "llama-3.3-70b-versatile",
 }
 
@@ -41,13 +40,8 @@ class Brain:
         self.groq_key  = os.getenv("GROQ_API_KEY")
         self.openai    = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
 
-        # active provider per user (telegram user_id -> provider name)
         self.user_provider: dict[int, str] = {}
-
-        # extensions register tools here
         self.tools: dict[str, callable] = {}
-
-        # conversation history per user
         self.history: dict[int, list] = {}
 
         self.system_prompt = (
@@ -62,10 +56,9 @@ class Brain:
     def register_tool(self, name: str, fn: callable):
         self.tools[name] = fn
         log.info(f"Tool registered: {name}")
-        
-        def register_extension(self, name: str, fn: callable):
-    """Alias for register_tool — used by extensions that call register_extension."""
-    self.register_tool(name, fn)
+
+    def register_extension(self, name: str, fn: callable):
+        self.register_tool(name, fn)
 
     def run_tool(self, name: str, **kwargs):
         if name not in self.tools:
@@ -95,13 +88,12 @@ class Brain:
         history  = self.history.setdefault(user_id, [])
         history.append({"role": "user", "content": message})
 
-        # Try preferred provider, then fallback chain
         order = [provider] + [p for p in PROVIDERS if p != provider]
         for p in order:
             try:
                 reply = self._call(p, history)
                 history.append({"role": "assistant", "content": reply})
-                if len(history) > 40:  # keep last 20 turns
+                if len(history) > 40:
                     self.history[user_id] = history[-40:]
                 return reply
             except Exception as e:
