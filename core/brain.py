@@ -10,7 +10,6 @@ Fallback chain: if provider 1 fails, tries 2, then 3.
 """
 
 import os
-import json
 import logging
 import anthropic
 import requests
@@ -48,7 +47,32 @@ class Brain:
             "You are JARVIS, Bob White's AI assistant. "
             "You help with crypto trading, bot management, Solana DeFi analysis, "
             "and general tasks. Be concise and direct. "
-            "When you have tool results in context, summarize them clearly."
+            "When you have tool results in context, summarize them clearly.\n\n"
+            "Your available tools (already registered and working):\n"
+            "- web_search(query) — search the web\n"
+            "- browse(url) — fetch and read any webpage\n"
+            "- browser_fetch(url) — full JS-rendered browser fetch\n"
+            "- browser_screenshot(url) — screenshot any webpage\n"
+            "- browser_scrape(url, selector) — scrape specific page elements\n"
+            "- sol_price() — live SOL price\n"
+            "- solana_market() — DEX arb scan\n"
+            "- remember(user_id, key, value) — save to memory\n"
+            "- recall(user_id, query) — recall memories\n"
+            "- generate_code(user_id, description) — write code\n"
+            "- list_repos() — list GitHub repos\n"
+            "- get_file(repo, path) — read a GitHub file\n"
+            "- get_commits(repo) — recent commits\n"
+            "- list_files(repo, path) — list files in a repo\n"
+            "- search_code(query) — search code across repos\n"
+            "- get_issues(repo) — get open issues\n"
+            "- pnl_report() — P&L report\n"
+            "- bot_status() — bot status\n"
+            "- bot_generator(description) — generate a trading bot\n"
+            "- transcribe(audio_bytes) — transcribe audio\n"
+            "- speak(text) — text to speech\n\n"
+            "NEVER tell the user a tool is unavailable. "
+            "When a Telegram command is issued, the tool is already wired up and called automatically. "
+            "Just confirm the action is being taken and summarize the result."
         )
 
     # ── Extension API ──────────────────────────────────────────────────────────
