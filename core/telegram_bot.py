@@ -8,6 +8,8 @@ Commands:
   /model     — Switch LLM provider
   /voice     — Toggle voice replies on/off
   /search    — Web search
+  /browse    — Browse any URL
+  /github    — Read your GitHub repos
   /remember  — Save a fact to memory
   /recall    — Recall memories
   /code      — Generate code
@@ -72,6 +74,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/model — Switch AI provider\n"
         "/voice — Toggle voice replies\n"
         "/search — Web search\n"
+        "/browse — Browse any URL\n"
+        "/github — Read your GitHub repos\n"
         "/remember — Save a fact\n"
         "/recall — Recall memories\n"
         "/code — Generate code\n"
@@ -200,6 +204,102 @@ async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _send_long(update, "\n\n".join(lines))
 
 
+async def cmd_browse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    url = " ".join(ctx.args) if ctx.args else ""
+    if not url:
+        await update.message.reply_text("Usage: `/browse <url>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🌐 Fetching: {url}...")
+    result = _brain.run_tool("browse", url=url)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    summary = _brain.chat(uid, f"Summarize this webpage content concisely:\n\n{result['content']}")
+    await _send_long(update, f"🌐 *{url}*\n\n{summary}")
+
+
+async def cmd_github(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    args = ctx.args if ctx.args else []
+    if not args:
+        await update.message.reply_text(
+            "Usage:\n"
+            "`/github repos` — list your repos\n"
+            "`/github files <repo>` — list files\n"
+            "`/github read <repo> <path>` — read a file\n"
+            "`/github commits <repo>` — recent commits\n"
+            "`/github search <query>` — search your code",
+            parse_mode="Markdown"
+        )
+        return
+
+    cmd = args[0].lower()
+
+    if cmd == "repos":
+        result = _brain.run_tool("list_repos")
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = ["*📁 Your Repos*\n"]
+        for r in result["repos"]:
+            icon = "🔒" if r["private"] else "📂"
+            desc = f" — {r['description']}" if r.get("description") else ""
+            lines.append(f"{icon} *{r['name']}*{desc}")
+        await _send_long(update, "\n".join(lines))
+
+    elif cmd == "files" and len(args) >= 2:
+        repo = args[1]
+        path = args[2] if len(args) > 2 else ""
+        result = _brain.run_tool("list_files", repo=repo, path=path)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = [f"*📁 {repo}/{result['path']}*\n"]
+        for f in result["items"]:
+            icon = "📁" if f["type"] == "dir" else "📄"
+            lines.append(f"{icon} {f['name']}")
+        await _send_long(update, "\n".join(lines))
+
+    elif cmd == "read" and len(args) >= 3:
+        repo = args[1]
+        path = args[2]
+        result = _brain.run_tool("get_file", repo=repo, path=path)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        await _send_long(update, f"*📄 {repo}/{path}*\n\n```\n{result['content']}\n```")
+
+    elif cmd == "commits" and len(args) >= 2:
+        repo = args[1]
+        result = _brain.run_tool("get_commits", repo=repo)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = [f"*📝 Recent commits: {repo}*\n"]
+        for c in result["commits"]:
+            lines.append(f"`{c['sha']}` {c['message']} — _{c['author']}_")
+        await _send_long(update, "\n".join(lines))
+
+    elif cmd == "search" and len(args) >= 2:
+        query = " ".join(args[1:])
+        result = _brain.run_tool("search_code", query=query)
+        if "error" in result:
+            await update.message.reply_text(f"❌ {result['error']}")
+            return
+        lines = [f"*🔍 Code search: {query}*\n"]
+        for r in result["results"]:
+            lines.append(f"• *{r['repo']}* — `{r['path']}`")
+        if not result["results"]:
+            lines.append("No results found.")
+        await _send_long(update, "\n".join(lines))
+
+    else:
+        await update.message.reply_text("❌ Unknown command. Try `/github` for usage.", parse_mode="Markdown")
+
+
 async def cmd_remember(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not _check_auth(uid): return
@@ -253,10 +353,7 @@ async def cmd_review(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _check_auth(uid): return
     code = " ".join(ctx.args) if ctx.args else ""
     if not code:
-        await update.message.reply_text(
-            "Usage: `/review <code>`",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("Usage: `/review <code>`", parse_mode="Markdown")
         return
     await update.message.reply_text("🔍 Reviewing code...")
     result = _brain.run_tool("review_code", user_id=uid, code=code)
@@ -305,10 +402,7 @@ async def cmd_explain(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _check_auth(uid): return
     code = " ".join(ctx.args) if ctx.args else ""
     if not code:
-        await update.message.reply_text(
-            "Usage: `/explain <code>`",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text("Usage: `/explain <code>`", parse_mode="Markdown")
         return
     await update.message.reply_text("📖 Explaining code...")
     result = _brain.run_tool("explain_code", user_id=uid, code=code)
@@ -497,6 +591,8 @@ async def start_telegram_bot(brain):
     app.add_handler(CommandHandler("model",    cmd_model))
     app.add_handler(CommandHandler("voice",    cmd_voice))
     app.add_handler(CommandHandler("search",   cmd_search))
+    app.add_handler(CommandHandler("browse",   cmd_browse))
+    app.add_handler(CommandHandler("github",   cmd_github))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("recall",   cmd_recall))
     app.add_handler(CommandHandler("code",     cmd_code))
