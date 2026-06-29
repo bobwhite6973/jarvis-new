@@ -4,12 +4,13 @@ Commands:
   /arb       — Solana cross-DEX spread scan
   /pnl       — Today's P&L report
   /status    — Bot status
-  /genbot    — Generate a new trading bot (describe in plain English)
+  /genbot    — Generate a new trading bot
   /model     — Switch LLM provider
   /voice     — Toggle voice replies on/off
+  /search    — Web search
   /clear     — Clear conversation history
   Free text  — Chat with JARVIS
-  Voice msg  — JARVIS transcribes, replies in text + optional voice note
+  Voice msg  — JARVIS transcribes + responds
 """
 
 import os
@@ -24,25 +25,21 @@ from telegram.ext import (
 
 log = logging.getLogger("telegram_bot")
 
-# Whitelist: only these Telegram user IDs can use the bot
 ALLOWED_USERS = set(
     int(x) for x in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",") if x.strip()
 )
 
 _brain = None
-
-# Users who have voice replies enabled
 _voice_users: set = set()
 
 
 def _check_auth(user_id: int) -> bool:
     if not ALLOWED_USERS:
-        return True  # if whitelist empty, allow all (dev mode)
+        return True
     return user_id in ALLOWED_USERS
 
 
 async def _send_long(update: Update, text: str):
-    """Split messages > 4096 chars for Telegram's limit."""
     if len(text) <= 4096:
         await update.message.reply_text(text, parse_mode="Markdown")
         return
@@ -66,6 +63,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/genbot — Generate a trading bot\n"
         "/model — Switch AI provider\n"
         "/voice — Toggle voice replies\n"
+        "/search — Web search\n"
         "/clear — Clear chat history\n\n"
         "Send a voice message and I'll transcribe + respond.\n"
         "Use /voice to also get audio replies.",
@@ -159,14 +157,36 @@ async def cmd_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _check_auth(uid): return
     if uid in _voice_users:
         _voice_users.discard(uid)
-        await update.message.reply_text("🔇 Voice replies *off*. I'll respond in text.", parse_mode="Markdown")
+        await update.message.reply_text("🔇 Voice replies *off*.", parse_mode="Markdown")
     else:
         _voice_users.add(uid)
-        await update.message.reply_text("🔊 Voice replies *on*. I'll send audio notes.", parse_mode="Markdown")
+        await update.message.reply_text("🔊 Voice replies *on*.", parse_mode="Markdown")
 
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not _check_auth(uid): return
+    query = " ".join(ctx.args) if ctx.args else ""
+    if not query:
+        await update.message.reply_text("Usage: `/search <query>`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(f"🔍 Searching: _{query}_...", parse_mode="Markdown")
+    result = _brain.run_tool("web_search", query=query)
+    if "error" in result:
+        await update.message.reply_text(f"❌ {result['error']}")
+        return
+    lines = [f"*🔍 Results for:* `{query}`\n"]
+    for r in result.get("results", []):
+        snippet = r['snippet'][:120]
+        lines.append(f"• [{r['title']}]({r['url']})\n  _{snippet}_")
+    if not result.get("results"):
+        lines.append("No results found.")
+    await _send_long(update, "\n\n".join(lines))
+
+
+# ── Message handlers ───────────────────────────────────────────────────────────
 
 async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
-    """Send text reply + optional voice note if user has voice enabled."""
     await _send_long(update, text)
     if uid in _voice_users:
         try:
@@ -174,7 +194,7 @@ async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
             audio = _brain.run_tool("speak", text=text)
             if isinstance(audio, bytes) and len(audio) > 0:
                 buf = io.BytesIO(audio)
-                buf.name = "jarvis.mp3"
+                buf.name = "jarvis.ogg"
                 buf.seek(0)
                 await ctx.bot.send_voice(
                     chat_id=update.effective_chat.id,
@@ -185,7 +205,6 @@ async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
 
 
 async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming voice messages — transcribe then respond."""
     uid = update.effective_user.id
     if not _check_auth(uid):
         await update.message.reply_text("🚫 Unauthorized.")
@@ -193,7 +212,6 @@ async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
 
-    # Download the voice file from Telegram
     try:
         voice_file = await update.message.voice.get_file()
         audio_bytes = bytes(await voice_file.download_as_bytearray())
@@ -201,20 +219,20 @@ async def handle_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Could not download voice message: {e}")
         return
 
-    # Transcribe
     try:
         transcript = _brain.run_tool("transcribe", audio_bytes=audio_bytes)
         if isinstance(transcript, dict) and "error" in transcript:
             await update.message.reply_text(f"❌ Transcription failed: {transcript['error']}")
             return
+        if not isinstance(transcript, str) or not transcript.strip():
+            await update.message.reply_text("❌ Could not transcribe audio — try again.")
+            return
     except Exception as e:
         await update.message.reply_text(f"❌ Transcription error: {e}")
         return
 
-    # Echo transcript so user knows what was heard
     await update.message.reply_text(f"🎙️ _{transcript}_", parse_mode="Markdown")
 
-    # Route through brain same as text
     lower = transcript.lower()
     if any(w in lower for w in ["spread", "arb", "arbitrage", "raydium", "orca"]):
         intent = "arb"
@@ -234,10 +252,23 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not _check_auth(uid):
         await update.message.reply_text("🚫 Unauthorized.")
         return
+
     text = update.message.text or ""
     await ctx.bot.send_chat_action(update.effective_chat.id, "typing")
-
     lower = text.lower()
+
+    # Auto-route search requests
+    if lower.startswith("search:") or lower.startswith("search "):
+        query = text.split(" ", 1)[1] if " " in text else text[7:]
+        result = _brain.run_tool("web_search", query=query)
+        reply = _brain.chat(
+            uid,
+            f"Web search results for '{query}': {result}\n\nSummarize these results clearly.",
+            intent="default"
+        )
+        await _reply_with_voice(update, ctx, reply, uid)
+        return
+
     if any(w in lower for w in ["spread", "arb", "arbitrage", "raydium", "orca"]):
         intent = "arb"
     elif any(w in lower for w in ["pnl", "profit", "loss", "trade"]):
@@ -313,6 +344,7 @@ async def start_telegram_bot(brain):
     app.add_handler(CommandHandler("genbot",  cmd_genbot))
     app.add_handler(CommandHandler("model",   cmd_model))
     app.add_handler(CommandHandler("voice",   cmd_voice))
+    app.add_handler(CommandHandler("search",  cmd_search))
     app.add_handler(CommandHandler("clear",   cmd_clear))
     app.add_handler(CallbackQueryHandler(cb_model, pattern="^model:"))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
@@ -320,11 +352,9 @@ async def start_telegram_bot(brain):
 
     log.info("Telegram bot running...")
 
-    # Use async context manager — compatible with Python 3.14 and existing event loops
     async with app:
         await app.start()
         await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        # Run forever until interrupted
         await asyncio.Event().wait()
         await app.updater.stop()
         await app.stop()
