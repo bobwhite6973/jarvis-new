@@ -173,9 +173,12 @@ async def _reply_with_voice(update: Update, ctx, text: str, uid: int):
             await ctx.bot.send_chat_action(update.effective_chat.id, "record_voice")
             audio = _brain.run_tool("speak", text=text)
             if isinstance(audio, bytes) and len(audio) > 0:
-                await update.message.reply_voice(
-                    voice=io.BytesIO(audio),
-                    caption="🎙️ JARVIS"
+                buf = io.BytesIO(audio)
+                buf.name = "jarvis.mp3"
+                buf.seek(0)
+                await ctx.bot.send_voice(
+                    chat_id=update.effective_chat.id,
+                    voice=buf,
                 )
         except Exception as e:
             log.warning(f"TTS failed: {e}")
