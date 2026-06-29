@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS Mark 5</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace; min-height: 100vh; }
+  header { background: #0d1117; border-bottom: 1px solid #1e3a5f; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { color: #00aaff; font-size: 1.4rem; letter-spacing: 4px; }
+  header .status { font-size: 0.75rem; color: #00ff88; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; padding: 1.5rem; }
+  .card { background: #0d1117; border: 1px solid #1e3a5f; border-radius: 8px; padding: 1.25rem; }
+  .card h2 { color: #00aaff; font-size: 0.8rem; letter-spacing: 2px; margin-bottom: 1rem; text-transform: uppercase; }
+  .sol-price { font-size: 2.5rem; color: #00ff88; font-weight: bold; }
+  .sol-label { font-size: 0.75rem; color: #666; margin-top: 0.25rem; }
+  .chat-box { display: flex; flex-direction: column; height: 300px; }
+  .chat-messages { flex: 1; overflow-y: auto; margin-bottom: 0.75rem; padding: 0.5rem; background: #060609; border-radius: 4px; border: 1px solid #1e3a5f; }
+  .chat-msg { margin-bottom: 0.75rem; font-size: 0.85rem; line-height: 1.5; }
+  .chat-msg.user { color: #00aaff; }
+  .chat-msg.jarvis { color: #00ff88; }
+  .chat-msg .label { font-size: 0.7rem; opacity: 0.6; margin-bottom: 0.2rem; }
+  .chat-input { display: flex; gap: 0.5rem; }
+  .chat-input input { flex: 1; background: #060609; border: 1px solid #1e3a5f; color: #e0e0e0; padding: 0.5rem 0.75rem; border-radius: 4px; font-family: inherit; font-size: 0.85rem; outline: none; }
+  .chat-input input:focus { border-color: #00aaff; }
+  .btn { background: #00aaff22; border: 1px solid #00aaff; color: #00aaff; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.8rem; letter-spacing: 1px; transition: all 0.2s; }
+  .btn:hover { background: #00aaff44; }
+  .btn.danger { background: #ff004422; border-color: #ff0044; color: #ff0044; }
+  .btn.danger:hover { background: #ff004444; }
+  .memory-list { max-height: 250px; overflow-y: auto; }
+  .memory-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #1e3a5f22; font-size: 0.82rem; }
+  .memory-item .key { color: #00aaff; }
+  .memory-item .value { color: #aaa; flex: 1; margin: 0 0.75rem; }
+  .memory-item button { background: none; border: none; color: #ff0044; cursor: pointer; font-size: 0.75rem; padding: 0.2rem 0.4rem; }
+  .arb-list { max-height: 250px; overflow-y: auto; }
+  .arb-item { padding: 0.5rem 0; border-bottom: 1px solid #1e3a5f22; font-size: 0.8rem; }
+  .arb-item .token { color: #00aaff; font-weight: bold; }
+  .arb-item .spread { color: #00ff88; }
+  .arb-item .route { color: #666; font-size: 0.75rem; }
+  .status-list { max-height: 200px; overflow-y: auto; }
+  .status-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; font-size: 0.85rem; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.green { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+  .dot.red { background: #ff0044; box-shadow: 0 0 6px #ff0044; }
+  .pnl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .pnl-item { background: #060609; border-radius: 4px; padding: 0.75rem; text-align: center; }
+  .pnl-item .val { font-size: 1.2rem; color: #00ff88; font-weight: bold; }
+  .pnl-item .lbl { font-size: 0.7rem; color: #666; margin-top: 0.2rem; }
+  .refresh-btn { font-size: 0.7rem; color: #444; cursor: pointer; background: none; border: none; float: right; }
+  .refresh-btn:hover { color: #00aaff; }
+  .loading { color: #444; font-size: 0.8rem; }
+  ::-webkit-scrollbar { width: 4px; } 
+  ::-webkit-scrollbar-track { background: #060609; }
+  ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ JARVIS MARK 5</h1>
+  <span class="status" id="header-status">● CONNECTING...</span>
+</header>
+
+<div class="grid">
+
+  <!-- SOL Price -->
+  <div class="card">
+    <h2>◎ SOL Price <button class="refresh-btn" onclick="loadSol()">↻</button></h2>
+    <div class="sol-price" id="sol-price">--</div>
+    <div class="sol-label" id="sol-updated">Loading...</div>
+  </div>
+
+  <!-- P&L -->
+  <div class="card">
+    <h2>📊 P&L Report <button class="refresh-btn" onclick="loadPnl()">↻</button></h2>
+    <div class="pnl-grid">
+      <div class="pnl-item"><div class="val" id="pnl-today">--</div><div class="lbl">Today</div></div>
+      <div class="pnl-item"><div class="val" id="pnl-week">--</div><div class="lbl">7 Days</div></div>
+      <div class="pnl-item"><div class="val" id="pnl-trades">--</div><div class="lbl">Trades</div></div>
+      <div class="pnl-item"><div class="val" id="pnl-winrate">--</div><div class="lbl">Win Rate</div></div>
+    </div>
+  </div>
+
+  <!-- Bot Status -->
+  <div class="card">
+    <h2>⚙️ Bot Status <button class="refresh-btn" onclick="loadStatus()">↻</button></h2>
+    <div class="status-list" id="status-list"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- ARB Scanner -->
+  <div class="card">
+    <h2>📈 Arb Opportunities <button class="refresh-btn" onclick="loadArb()">↻</button></h2>
+    <div class="arb-list" id="arb-list"><div class="loading">Loading...</div></div>
+  </div>
+
+  <!-- Chat -->
+  <div class="card" style="grid-column: span 2;">
+    <h2>💬 Chat with JARVIS</h2>
+    <div class="chat-box">
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg jarvis"><div class="label">JARVIS</div>Online and ready, sir.</div>
+      </div>
+      <div class="chat-input">
+        <input type="text" id="chat-input" placeholder="Ask JARVIS anything..." onkeydown="if(event.key==='Enter') sendChat()">
+        <button class="btn" onclick="sendChat()">SEND</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Memory -->
+  <div class="card" style="grid-column: span 2;">
+    <h2>🧠 Memory <button class="refresh-btn" onclick="loadMemory()">↻</button></h2>
+    <div class="memory-list" id="memory-list"><div class="loading">Loading...</div></div>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+
+async function fetchJSON(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.statusText);
+    return await r.json();
+  } catch(e) {
+    console.error(url, e);
+    return null;
+  }
+}
+
+async function loadSol() {
+  const data = await fetchJSON(`${API}/api/sol`);
+  if (data && data.price) {
+    document.getElementById('sol-price').textContent = `$${data.price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    document.getElementById('sol-updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }
+}
+
+async function loadPnl() {
+  const data = await fetchJSON(`${API}/api/pnl`);
+  if (data) {
+    document.getElementById('pnl-today').textContent = data.today_pnl || 'N/A';
+    document.getElementById('pnl-week').textContent = data.week_pnl || 'N/A';
+    document.getElementById('pnl-trades').textContent = data.trade_count || 'N/A';
+    document.getElementById('pnl-winrate').textContent = data.win_rate || 'N/A';
+  }
+}
+
+async function loadStatus() {
+  const data = await fetchJSON(`${API}/api/status`);
+  const el = document.getElementById('status-list');
+  if (!data || !data.bots || data.bots.length === 0) {
+    el.innerHTML = '<div class="loading">No bots registered.</div>';
+    return;
+  }
+  el.innerHTML = data.bots.map(b => `
+    <div class="status-item">
+      <div class="dot ${b.status === 'running' ? 'green' : 'red'}"></div>
+      <span>${b.name}</span>
+      <span style="color:#444;font-size:0.75rem;margin-left:auto">${b.status}</span>
+    </div>
+  `).join('');
+}
+
+async function loadArb() {
+  const data = await fetchJSON(`${API}/api/arb`);
+  const el = document.getElementById('arb-list');
+  if (!data || !data.opportunities || data.opportunities.length === 0) {
+    el.innerHTML = '<div class="loading">No opportunities found.</div>';
+    return;
+  }
+  el.innerHTML = data.opportunities.slice(0, 8).map(o => `
+    <div class="arb-item">
+      <span class="token">${o.token}</span>
+      <span class="spread" style="margin-left:0.5rem">+${o.net_spread_pct?.toFixed(2)}%</span>
+      <div class="route">${o.buy_dex} → ${o.sell_dex} | Est: $${o.est_profit_usd?.toFixed(4)}</div>
+    </div>
+  `).join('');
+}
+
+async function loadMemory() {
+  const data = await fetchJSON(`${API}/api/memory?user_id=0`);
+  const el = document.getElementById('memory-list');
+  if (!data || !data.memories || data.memories.length === 0) {
+    el.innerHTML = '<div class="loading">No memories stored.</div>';
+    return;
+  }
+  el.innerHTML = data.memories.map(m => `
+    <div class="memory-item">
+      <span class="key">${m.key}</span>
+      <span class="value">${m.value}</span>
+      <button onclick="forgetMemory('${m.key}')">✕</button>
+    </div>
+  `).join('');
+}
+
+async function forgetMemory(key) {
+  await fetch(`${API}/api/memory/${encodeURIComponent(key)}?user_id=0`, {method: 'DELETE'});
+  loadMemory();
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+
+  const messages = document.getElementById('chat-messages');
+  messages.innerHTML += `<div class="chat-msg user"><div class="label">YOU</div>${msg}</div>`;
+  messages.innerHTML += `<div class="chat-msg jarvis" id="thinking"><div class="label">JARVIS</div>Thinking...</div>`;
+  messages.scrollTop = messages.scrollHeight;
+
+  try {
+    const r = await fetch(`${API}/api/chat`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg, user_id: 0})
+    });
+    const data = await r.json();
+    document.getElementById('thinking').outerHTML = `<div class="chat-msg jarvis"><div class="label">JARVIS</div>${data.reply || data.detail}</div>`;
+  } catch(e) {
+    document.getElementById('thinking').outerHTML = `<div class="chat-msg jarvis"><div class="label">JARVIS</div>❌ Error connecting.</div>`;
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
+async function checkHealth() {
+  const data = await fetchJSON(`${API}/api/health`);
+  const el = document.getElementById('header-status');
+  if (data && data.status === 'ok') {
+    el.textContent = `● ONLINE — ${data.extensions?.length || 0} EXTENSIONS`;
+    el.style.color = '#00ff88';
+  } else {
+    el.textContent = '● OFFLINE';
+    el.style.color = '#ff0044';
+  }
+}
+
+// Load everything on start
+checkHealth();
+loadSol();
+loadPnl();
+loadStatus();
+loadArb();
+loadMemory();
+
+// Auto-refresh
+setInterval(loadSol, 30000);
+setInterval(loadArb, 60000);
+setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>
