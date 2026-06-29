@@ -1,5 +1,5 @@
 """
-JARVIS Mark 5 — Bob White  Edition
+JARVIS Mark 5 — Bob White Edition
 Entry point. Loads extensions, starts brain, starts Telegram bot.
 """
 
@@ -38,7 +38,7 @@ def load_extensions(brain):
     return loaded
 
 
-def main():
+async def main():
     log.info("JARVIS Mark 5 starting...")
 
     from core.brain import Brain
@@ -48,8 +48,9 @@ def main():
     log.info(f"Loaded {len(extensions)} extensions: {extensions}")
 
     from core.telegram_bot import start_telegram_bot
-    start_telegram_bot(brain)
+    await start_telegram_bot(brain)
 
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
