@@ -1,7 +1,7 @@
 """
 Extension: web_search
-Primary: DuckDuckGo HTML endpoint via GET (POST triggers anti-bot blocking
-from datacenter IPs like Render; GET does not).
+Primary: DuckDuckGo HTML endpoint (more reliable than the JSON Instant Answer API,
+which times out from some hosting environments).
 Fallback: DuckDuckGo Instant Answer JSON API.
 Second fallback: Wikipedia search API (for factual/reference queries).
 web_search(query) -> dict with results
@@ -17,14 +17,8 @@ DDG_JSON_URL = "https://api.duckduckgo.com/"
 WIKI_URL = "https://en.wikipedia.org/w/api.php"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://duckduckgo.com/",
+    "User-Agent": "Mozilla/5.0 (compatible; JarvisBot/1.0; +https://render.com)"
 }
-
-BLOCK_MARKERS = ("anomaly", "unusual traffic", "captcha")
 
 
 class _DDGResultParser(HTMLParser):
@@ -63,18 +57,13 @@ class _DDGResultParser(HTMLParser):
 
 
 def _search_ddg_html(query: str, max_results: int) -> list:
-    # IMPORTANT: use GET, not POST. DuckDuckGo's bot-detection flags POST
-    # requests from datacenter IPs far more aggressively than GET.
-    resp = requests.get(
+    resp = requests.post(
         DDG_HTML_URL,
-        params={"q": query},
+        data={"q": query},
         headers=HEADERS,
         timeout=12,
     )
     resp.raise_for_status()
-    text_lower = resp.text.lower()
-    if any(marker in text_lower for marker in BLOCK_MARKERS):
-        raise RuntimeError("blocked by DuckDuckGo anti-bot page")
     parser = _DDGResultParser()
     parser.feed(resp.text)
     return parser.results[:max_results]
