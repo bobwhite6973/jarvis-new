@@ -1,2 +1,2 @@
-# DEPRECATED — bad filename (comma instead of dot)
-# This file does nothing. The real extension is web_browse.py
+# DELETED — this file was created with a comma instead of a dot in the filename.
+# Safe to ignore. Do not import from here.
