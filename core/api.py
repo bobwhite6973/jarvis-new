@@ -11,6 +11,7 @@ import re
 import logging
 import inspect
 import sqlite3
+import io
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -261,6 +262,10 @@ async def api_memory(user_id: int = 1):
     result = await run_tool("recall", user_id=user_id, query="")
     return result
 
+@app.get("/api/github")
+async def github():
+    result = await run_tool("list_repos")
+    return result
 
 @app.get("/api/search")
 async def api_search(q: str = ""):
@@ -269,6 +274,7 @@ async def api_search(q: str = ""):
     result = await run_tool("web_search", query=q)
     return result
 
+# ── Voice endpoints
 
 @app.get("/api/github")
 async def api_github():
