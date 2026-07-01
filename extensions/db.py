@@ -1,13 +1,7 @@
 """
 Shared database utility for JARVIS extensions.
-Uses Supabase (Postgres) as primary connection via the DATABASE_URL
-environment variable. Falls back to SQLite only if Postgres is
-unreachable or unconfigured.
-
-SECURITY NOTE: Do NOT hardcode credentials in this file. Set
-DATABASE_URL as an environment variable in Render (or your deploy
-target). This file will refuse to connect to Postgres if that
-variable is not set, and will fall back to local SQLite instead.
+Uses Postgres (Supabase) as primary connection via DATABASE_URL env var.
+Falls back to SQLite only if DATABASE_URL is not set or connection fails.
 
 Usage:
     from extensions.db import get_conn, DB_TYPE
@@ -19,22 +13,21 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.db")
 
-# Postgres connection string must come from the environment.
-# Set DATABASE_URL in Render's environment variables dashboard.
+# Postgres connection string must come from environment only.
+# No credentials are hardcoded in source — set DATABASE_URL in Render.
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # SQLite fallback path
 SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
 
-# Unknown until a connection attempt actually succeeds/fails.
-DB_TYPE = "unknown"
+DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
 
 
 def get_conn():
     """
     Returns a database connection.
     - Postgres (Supabase) as primary, using DATABASE_URL from environment.
-    - SQLite fallback if DATABASE_URL is not set or connection fails.
+    - SQLite fallback if DATABASE_URL is missing or connection fails.
     """
     global DB_TYPE
 
@@ -117,4 +110,4 @@ def fetchone(conn, sql: str, params: tuple = ()):
         return conn.execute(sql, params).fetchone()
 
 
-log.info("JARVIS DB layer loaded — DB_TYPE will be determined on first get_conn() call")
+log.info("JARVIS DB layer initialized — using %s", DB_TYPE.upper())
