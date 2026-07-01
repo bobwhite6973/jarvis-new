@@ -1,54 +1,101 @@
 """
 Shared database utility for JARVIS extensions.
 Uses Postgres (via DATABASE_URL env var) as primary connection.
-Falls back to SQLite only if DATABASE_URL is not set or connection fails.
+Falls back to SQLite only if DATABASE_URL is not set or connection fails
+after retries.
 
 Usage:
-    from extensions.db import get_conn, DB_TYPE
+    from extensions.db import get_conn, DB_TYPE, is_postgres
 """
 
 import os
+import time
 import logging
 from pathlib import Path
 
 log = logging.getLogger("jarvis.db")
 
-# No hardcoded credentials — must be provided via environment variable.
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
 # SQLite fallback path
 SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
 
-DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
+# Number of connection attempts before giving up and using SQLite.
+CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "3"))
+RETRY_DELAY_SECONDS = float(os.environ.get("DB_RETRY_DELAY", "0.75"))
+
+# Tracks the backend actually in use as of the most recent get_conn() call.
+# NOTE: this reflects the *last* connection attempt, not a permanent choice.
+DB_TYPE = "postgres" if os.environ.get("DATABASE_URL") else "sqlite"
+
+
+def _database_url() -> str | None:
+    """
+    Always re-read the env var at call time rather than caching it once
+    at import time. This does NOT fix the need for Render to restart the
+    process when a new env var is added (env vars are injected at process
+    start, full stop) — but it avoids a second, needless source of
+    staleness if the env var is ever mutated programmatically or the
+    module gets re-imported.
+    """
+    return os.environ.get("DATABASE_URL")
 
 
 def get_conn():
     """
     Returns a database connection.
     - Postgres if DATABASE_URL env var is set and connection succeeds
-    - SQLite fallback if DATABASE_URL is missing or connection fails
+      (retries a few times to survive transient network blips before
+      giving up).
+    - SQLite fallback if DATABASE_URL is missing or all retries fail.
+      Falling back is now logged at CRITICAL level so it can't be missed
+      in Render logs.
     """
     global DB_TYPE
 
-    if DATABASE_URL:
+    database_url = _database_url()
+
+    if database_url:
+        last_err = None
         try:
             import psycopg2
-            conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-            DB_TYPE = "postgres"
-            log.debug("Connected to Postgres")
-            return conn
         except ImportError:
-            log.error("psycopg2 not installed — falling back to SQLite")
-        except Exception as e:
-            log.error("Postgres connection failed: %s — falling back to SQLite", e)
-    else:
-        log.warning("DATABASE_URL not set — falling back to SQLite")
+            log.critical("psycopg2 not installed — falling back to SQLite. Memory will NOT persist across redeploys.")
+            DB_TYPE = "sqlite"
+            return _sqlite_conn()
 
-    # SQLite fallback
+        for attempt in range(1, CONNECT_RETRIES + 1):
+            try:
+                conn = psycopg2.connect(database_url, sslmode="require", connect_timeout=5)
+                DB_TYPE = "postgres"
+                if attempt > 1:
+                    log.warning("Postgres connection succeeded on retry attempt %d", attempt)
+                else:
+                    log.debug("Connected to Postgres")
+                return conn
+            except Exception as e:
+                last_err = e
+                log.error("Postgres connection attempt %d/%d failed: %s", attempt, CONNECT_RETRIES, e)
+                if attempt < CONNECT_RETRIES:
+                    time.sleep(RETRY_DELAY_SECONDS)
+
+        log.critical(
+            "Postgres connection FAILED after %d attempts (%s) — falling back to EPHEMERAL SQLite. "
+            "Any data written now will be LOST on next redeploy.",
+            CONNECT_RETRIES, last_err
+        )
+    else:
+        log.critical(
+            "DATABASE_URL is not set in this process's environment — falling back to EPHEMERAL SQLite. "
+            "If you just added it in Render, the running process must be RESTARTED/REDEPLOYED to pick it up; "
+            "adding an env var alone does not update a process already running."
+        )
+
     DB_TYPE = "sqlite"
+    return _sqlite_conn()
+
+
+def _sqlite_conn():
     import sqlite3
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    log.warning("Using ephemeral SQLite - data will be lost on redeploy!")
     return sqlite3.connect(SQLITE_PATH)
 
 
@@ -109,4 +156,4 @@ def fetchone(conn, sql: str, params: tuple = ()):
         return conn.execute(sql, params).fetchone()
 
 
-log.info("JARVIS DB layer initialized — using %s", DB_TYPE.upper())
+log.info("JARVIS DB layer initialized — DATABASE_URL present at import: %s", bool(os.environ.get("DATABASE_URL")))
