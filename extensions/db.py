@@ -1,7 +1,7 @@
 """
 Shared database utility for JARVIS extensions.
-Automatically uses Supabase (Postgres) if DATABASE_URL is set in env,
-otherwise falls back to local SQLite for development.
+Uses Supabase (Postgres) as primary connection with hardcoded credentials.
+Falls back to SQLite only if Postgres connection fails.
 
 Usage:
     from extensions.db import get_conn, DB_TYPE
@@ -13,32 +13,40 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.db")
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
+# Hardcoded Supabase connection (always works)
+SUPABASE_URL = "postgresql://postgres:153Etr23!Bob@db.nfmpvdnjipuwhksckayg.supabase.co:5432/postgres"
+
+# Allow override via environment variable
+DATABASE_URL = os.environ.get("DATABASE_URL", SUPABASE_URL)
 
 # SQLite fallback path
 SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
+
+DB_TYPE = "postgres"  # Default to postgres since we have hardcoded credentials
 
 
 def get_conn():
     """
     Returns a database connection.
-    - Postgres (Supabase) if DATABASE_URL is set
-    - SQLite fallback otherwise
+    - Postgres (Supabase) as primary (hardcoded credentials)
+    - SQLite fallback only if connection fails
     """
-    if DB_TYPE == "postgres":
-        try:
-            import psycopg2
-            conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-            return conn
-        except ImportError:
-            log.error("psycopg2 not installed — falling back to SQLite")
-        except Exception as e:
-            log.error("Postgres connection failed: %s — falling back to SQLite", e)
+    try:
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+        log.debug("Connected to Postgres (Supabase)")
+        return conn
+    except ImportError:
+        log.error("psycopg2 not installed — falling back to SQLite")
+    except Exception as e:
+        log.error("Postgres connection failed: %s — falling back to SQLite", e)
 
-    # SQLite fallback
+    # SQLite fallback only if Postgres fails
+    global DB_TYPE
+    DB_TYPE = "sqlite"
     import sqlite3
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log.warning("Using ephemeral SQLite - data will be lost on redeploy!")
     return sqlite3.connect(SQLITE_PATH)
 
 
