@@ -1,9 +1,12 @@
 """
-JARVIS Brain — Multi-provider LLM router with native tool use.
+JARVIS Brain — Multi-provider LLM router with native tool use + Auto-Learning.
 
 Default: Groq (llama-3.1-8b-instant) — free, fast, high rate limits
 Fallback: Claude (claude-sonnet-4-6) — if credits available
 Optional: OpenAI (gpt-4o)
+
+NEW: Auto-recall relevant memories before each response
+     Auto-store interactions after each response
 """
 
 import os
@@ -13,6 +16,7 @@ import inspect
 import anthropic
 import requests
 from openai import OpenAI
+from datetime import datetime, timezone
 
 log = logging.getLogger("brain")
 
@@ -127,17 +131,110 @@ class Brain:
             log.error(f"Tool {name} raised: {e}")
             return {"error": str(e)}
 
+    def _auto_recall_context(self, user_id: int, message: str) -> str:
+        """
+        Auto-recall relevant memories & lessons before processing.
+        Returns augmented context string to inject into system prompt.
+        """
+        context_parts = []
+        
+        try:
+            from extensions import memory, learning
+            
+            # 1. Recall user memories (keywords from message)
+            keywords = message.lower().split()[:5]  # first 5 words
+            mem_results = memory.recall(user_id=user_id, query=" ".join(keywords))
+            if mem_results.get("memories"):
+                context_parts.append("📝 RELEVANT MEMORIES:")
+                for m in mem_results["memories"][:3]:  # top 3
+                    context_parts.append(f"  • [{m.get('category', 'general')}] {m.get('key')}: {m.get('value')}")
+            
+            # 2. Get recent lessons learned
+            lesson_results = learning.get_lessons(limit=5)
+            if lesson_results.get("lessons"):
+                context_parts.append("\n🧠 RECENT LESSONS:")
+                for les in lesson_results["lessons"]:
+                    context_parts.append(f"  • [{les.get('category')}] {les.get('lesson')} (confidence: {les.get('confidence', 0):.2f})")
+        
+        except Exception as e:
+            log.warning(f"Auto-recall failed: {e}")
+        
+        return "\n".join(context_parts) if context_parts else ""
+
+    def _auto_store_interaction(self, user_id: int, message: str, response: str, tools_used: list):
+        """
+        Auto-store interaction to learning DB after response.
+        """
+        try:
+            from extensions import learning
+            
+            # Categorize interaction
+            category = "general"
+            if any(word in message.lower() for word in ["bot", "trade", "pnl", "sol", "arb"]):
+                category = "crypto"
+            elif any(word in message.lower() for word in ["code", "commit", "github", "repo"]):
+                category = "coding"
+            elif any(word in message.lower() for word in ["remember", "recall", "memory"]):
+                category = "memory"
+            
+            # Record interaction
+            action = f"user_query: {message[:50]}..."
+            outcome = "success" if "error" not in response.lower() else "partial"
+            
+            from extensions.db import get_conn
+            conn = get_conn()
+            try:
+                cur = conn.cursor()
+                now = datetime.now(timezone.utc).isoformat()
+                cur.execute("""
+                    INSERT INTO interactions (timestamp, category, action, outcome, context)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (now, category, action, outcome, json.dumps({
+                    "message": message[:200],
+                    "response_preview": response[:200],
+                    "tools_used": tools_used
+                })))
+                conn.commit()
+                log.info(f"✅ Interaction stored: [{category}] {action}")
+            finally:
+                conn.close()
+                
+        except Exception as e:
+            log.warning(f"Auto-store failed: {e}")
+
     def chat(self, user_id: int, message: str, provider: str = None) -> str:
+        """
+        Enhanced chat with auto-recall before and auto-store after.
+        """
+        # ── STEP 1: Auto-recall context ──
+        recalled_context = self._auto_recall_context(user_id, message)
+        
+        # ── STEP 2: Inject context into system prompt if available ──
+        original_prompt = self.system_prompt
+        if recalled_context:
+            self.system_prompt = f"{original_prompt}\n\n{recalled_context}"
+            log.info(f"📚 Injected {len(recalled_context)} chars of context")
+        
+        # ── STEP 3: Process message normally ──
         provider = provider or self.user_provider.get(user_id) or INTENT_PROVIDER.get("default", "claude")
         history = self.history.setdefault(user_id, [])
         history.append({"role": "user", "content": message})
 
         if provider == "groq":
-            return self._chat_groq(user_id, history)
+            response = self._chat_groq(user_id, history)
         elif provider == "openai":
-            return self._chat_openai(user_id, history)
+            response = self._chat_openai(user_id, history)
         else:
-            return self._chat_claude(user_id, history)
+            response = self._chat_claude(user_id, history)
+        
+        # ── STEP 4: Auto-store interaction ──
+        tools_used = [name for name in self.tools.keys() if name.lower() in message.lower()]
+        self._auto_store_interaction(user_id, message, response, tools_used)
+        
+        # ── STEP 5: Restore original prompt ──
+        self.system_prompt = original_prompt
+        
+        return response
 
     def _chat_groq(self, user_id: int, history: list) -> str:
         if not self.groq_key:
@@ -192,7 +289,7 @@ class Brain:
 
             while True:
                 kwargs = dict(
-                    model="claude-sonnet-4-5",
+                    model="claude-sonnet-4-20250514",
                     max_tokens=4096,
                     system=self.system_prompt,
                     messages=messages,
