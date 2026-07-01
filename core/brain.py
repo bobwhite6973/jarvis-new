@@ -1,9 +1,9 @@
 """
 JARVIS Brain — Multi-provider LLM router with native tool use.
 
-Default: Claude (claude-sonnet-4-6) with native tool calling
-Fast data queries: Groq (llama-3.3-70b-versatile)
-Optional third: OpenAI (gpt-4o)
+Default: Groq (llama-3.1-8b-instant) — free, fast, high rate limits
+Fallback: Claude (claude-sonnet-4-6) — if credits available
+Optional: OpenAI (gpt-4o)
 """
 
 import os
@@ -16,7 +16,7 @@ from openai import OpenAI
 
 log = logging.getLogger("brain")
 
-PROVIDERS = ["claude", "groq", "openai"]
+PROVIDERS = ["groq", "claude", "openai"]
 
 INTENT_PROVIDER = {
     "arb":     "groq",
@@ -42,27 +42,17 @@ SYSTEM_PROMPT = (
     "3. When asked to write and commit code: write the code yourself, then call commit_file.\n"
     "4. Do NOT call generate_code — write the code directly.\n"
     "5. NEVER fabricate tool responses. Report actual results.\n"
-    "6. You CAN call multiple different tools in one response — use them freely."
+    "6. You CAN call multiple different tools in one response."
 )
 
-# Tools that cause recursion — excluded from Claude's tool use API
 EXCLUDE_FROM_CLAUDE_TOOLS = {
-    "generate_code",
-    "review_code",
-    "fix_code",
-    "improve_code",
-    "explain_code",
-    "browser_run",
-    "audit_repo",
-    "get_memory_context",
-    "memory_store",
-    "memory_recall",
-    "record_tool_call",
+    "generate_code", "review_code", "fix_code", "improve_code", "explain_code",
+    "browser_run", "audit_repo", "get_memory_context", "memory_store",
+    "memory_recall", "record_tool_call",
 }
 
 
 def build_claude_tools(tools: dict) -> list:
-    """Convert registered tools into Claude's native tool format."""
     claude_tools = []
     for name, fn in tools.items():
         if name in EXCLUDE_FROM_CLAUDE_TOOLS:
@@ -86,7 +76,6 @@ def build_claude_tools(tools: dict) -> list:
                 properties[param_name] = prop
                 if param.default == inspect.Parameter.empty:
                     required.append(param_name)
-
             claude_tools.append({
                 "name": name,
                 "description": (fn.__doc__ or f"Tool: {name}").strip()[:200],
@@ -98,13 +87,12 @@ def build_claude_tools(tools: dict) -> list:
             })
         except Exception as e:
             log.warning(f"Could not build tool schema for {name}: {e}")
-
     return claude_tools
 
 
 class Brain:
     def __init__(self):
-        self.anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        self.anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
         self.groq_key = os.getenv("GROQ_API_KEY")
         self.openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
 
@@ -112,8 +100,6 @@ class Brain:
         self.tools: dict[str, callable] = {}
         self.history: dict[int, list] = {}
         self.system_prompt = SYSTEM_PROMPT
-
-    # ── Extension API ──────────────────────────────────────────────────────────
 
     def register_tool(self, name: str, fn: callable):
         self.tools[name] = fn
@@ -132,7 +118,6 @@ class Brain:
             return {"error": str(e)}
 
     def _execute_tool(self, name: str, tool_input: dict):
-        """Execute a tool call from Claude's native tool use."""
         if name not in self.tools:
             return {"error": f"Unknown tool: {name}"}
         try:
@@ -155,57 +140,97 @@ class Brain:
             log.error(f"Tool {name} execution error: {e}")
             return {"error": str(e)}
 
-    # ── Provider selection ─────────────────────────────────────────────────────
-
     def resolve_provider(self, user_id: int, intent: str = "default") -> str:
         if user_id in self.user_provider:
             return self.user_provider[user_id]
-        return INTENT_PROVIDER.get(intent, "claude")
+        return INTENT_PROVIDER.get(intent, "groq")
 
     def set_provider(self, user_id: int, provider: str):
         if provider not in PROVIDERS:
             raise ValueError(f"Unknown provider: {provider}")
         self.user_provider[user_id] = provider
 
-    # ── Chat ───────────────────────────────────────────────────────────────────
+    def _available_providers(self) -> list[str]:
+        available = []
+        if self.groq_key:
+            available.append("groq")
+        if os.getenv("ANTHROPIC_API_KEY"):
+            available.append("claude")
+        if self.openai:
+            available.append("openai")
+        return available
 
     def chat(self, user_id: int, message: str, intent: str = "default") -> str:
-        provider = self.resolve_provider(user_id, intent)
+        preferred = self.resolve_provider(user_id, intent)
         history = self.history.setdefault(user_id, [])
         history.append({"role": "user", "content": message})
 
-        order = [provider] + [p for p in PROVIDERS if p != provider]
+        # Keep history short to avoid payload limits
+        if len(history) > 10:
+            self.history[user_id] = history[-10:]
+            history = self.history[user_id]
+
+        available = self._available_providers()
+        if not available:
+            return "No API keys configured. Add GROQ_API_KEY to Render environment."
+
+        order = [preferred] + [p for p in PROVIDERS if p != preferred and p in available]
+        order = [p for p in order if p in available]
+
         for p in order:
             try:
                 reply = self._call(p, list(history))
                 history.append({"role": "assistant", "content": reply})
-                if len(history) > 40:
-                    self.history[user_id] = history[-40:]
                 return reply
             except Exception as e:
                 log.warning(f"Provider {p} failed: {e}")
 
-        return "All providers failed. Check API keys."
+        return "All providers failed. Check API keys in Render environment."
 
     def _call(self, provider: str, history: list) -> str:
-        if provider == "claude":
-            return self._call_claude(history)
-        elif provider == "groq":
+        if provider == "groq":
             return self._call_groq(history)
+        elif provider == "claude":
+            return self._call_claude(history)
         elif provider == "openai":
             return self._call_openai(history)
         raise ValueError(f"Unknown provider: {provider}")
 
+    def _call_groq(self, history: list) -> str:
+        if not self.groq_key:
+            raise RuntimeError("GROQ_API_KEY not set")
+        tool_list = "\n".join(
+            f"- {name}" for name in self.tools
+            if name not in EXCLUDE_FROM_CLAUDE_TOOLS
+        )
+        groq_system = self.system_prompt + f"\n\nAvailable tools:\n{tool_list}"
+
+        # Trim history content to avoid 413
+        trimmed = []
+        for msg in history[-6:]:  # Only last 6 messages
+            content = msg["content"]
+            if isinstance(content, str) and len(content) > 1000:
+                content = content[:1000] + "...[truncated]"
+            trimmed.append({"role": msg["role"], "content": content})
+
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {self.groq_key}"},
+            json={
+                "model": GROQ_MODELS["fast"],
+                "messages": [{"role": "system", "content": groq_system}] + trimmed,
+                "max_tokens": 2048,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
     def _call_claude(self, history: list) -> str:
-        """
-        Claude with native tool use.
-        Allows multiple different tools per response.
-        Blocks only exact duplicate calls (same tool + same args).
-        """
         claude_tools = build_claude_tools(self.tools)
         messages = list(history)
         max_rounds = 5
-        tools_called = set()  # tracks tool_name:args_hash to block exact duplicates
+        tools_called = set()
 
         for round_num in range(max_rounds):
             kwargs = {
@@ -235,10 +260,8 @@ class Brain:
                         tool_input = block.input
                         tool_use_id = block.id
 
-                        # Block only exact duplicate calls (same tool + same args)
                         call_key = f"{tool_name}:{str(tool_input)[:100]}"
                         if call_key in tools_called:
-                            log.warning(f"Duplicate call blocked: {tool_name}")
                             result = {"error": f"Duplicate call blocked: {tool_name}"}
                         else:
                             tools_called.add(call_key)
@@ -246,8 +269,6 @@ class Brain:
                             result = self._execute_tool(tool_name, tool_input)
 
                         result_str = json.dumps(result, default=str) if isinstance(result, dict) else str(result)
-                        log.info(f"Tool {tool_name} result: {result_str[:200]}")
-
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_use_id,
@@ -263,9 +284,7 @@ class Brain:
                         return block.text
                 return f"Stopped: {resp.stop_reason}"
 
-        # Max rounds hit — get final summary
-        log.warning("Tool loop hit max rounds — requesting final summary")
-        messages.append({"role": "user", "content": "Summarize what you did and the results."})
+        messages.append({"role": "user", "content": "Summarize what you did."})
         final = self.anthropic_client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
@@ -276,27 +295,6 @@ class Brain:
             if hasattr(block, "text"):
                 return block.text
         return "Completed."
-
-    def _call_groq(self, history: list) -> str:
-        if not self.groq_key:
-            raise RuntimeError("GROQ_API_KEY not set")
-        tool_list = "\n".join(
-            f"- {name}" for name in self.tools
-            if name not in EXCLUDE_FROM_CLAUDE_TOOLS
-        )
-        groq_system = self.system_prompt + f"\n\nAvailable tools:\n{tool_list}"
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.groq_key}"},
-            json={
-                "model": GROQ_MODELS["smart"],
-                "messages": [{"role": "system", "content": groq_system}] + history,
-                "max_tokens": 2048,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
 
     def _call_openai(self, history: list) -> str:
         if not self.openai:
