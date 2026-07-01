@@ -1,2 +1,2 @@
-# DEPRECATED — typo duplicate of __init__.py
-# This file does nothing. The real package initializer is __init__.py
+# DELETED — this file was created by mistake (missing underscore in __init__.py)
+# Safe to ignore. Do not import from here.

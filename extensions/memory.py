@@ -113,10 +113,10 @@ def remember(user_id: int, key: str, value: str, category: str = "general") -> d
         return {"status": "ok", "message": msg}
     except Exception as e:
         log.error("remember() failed: %s", e)
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 
-def recall(user_id: int, query: str = "") -> dict:
+def recall(user_id: int, query: str = None) -> dict:
     """Retrieve memories. Returns everything or filters by query."""
     try:
         conn = get_conn()
@@ -152,7 +152,7 @@ def recall(user_id: int, query: str = "") -> dict:
         return {"memories": memories, "count": len(memories)}
     except Exception as e:
         log.error("recall() failed: %s", e)
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 
 def forget(user_id: int, key: str) -> dict:
@@ -180,20 +180,17 @@ def forget(user_id: int, key: str) -> dict:
         log.error("forget() failed: %s", e)
         return {"error": str(e)}
 
+        msg = f"🗑️ Forgot: {key}"
+        log.info(msg)
+        return {"status": "ok", "message": msg}
 
-def get_context(user_id: int) -> str:
-    """Returns a formatted memory context string for injection into prompts."""
-    result = recall(user_id)
-    memories = result.get("memories", [])
-    if not memories:
-        return ""
-    lines = ["Bob's memory context:"]
-    for m in memories[:20]:
-        lines.append(f"  [{m['category']}] {m['key']}: {m['value']}")
-    return "\n".join(lines)
+    except Exception as e:
+        log.error("forget() failed: %s", e)
+        return {"status": "error", "message": str(e)}
 
 
 def register(brain):
+    """Register memory tools with the brain."""
     _init_db()
     brain.register_tool("remember", remember)
     brain.register_tool("recall", recall)

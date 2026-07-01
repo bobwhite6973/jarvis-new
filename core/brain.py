@@ -101,6 +101,15 @@ class Brain:
         self.history: dict[int, list] = {}
         self.system_prompt = SYSTEM_PROMPT
 
+        # ── Initialize persistent storage on startup ──
+        try:
+            from extensions import memory, learning
+            memory._init_db()
+            learning._init_db()
+            log.info("Memory & Learning DBs initialized on startup.")
+        except Exception as e:
+            log.warning(f"DB init skipped: {e}")
+
     def register_tool(self, name: str, fn: callable):
         self.tools[name] = fn
         log.info(f"Tool registered: {name}")
@@ -112,199 +121,127 @@ class Brain:
         if name not in self.tools:
             return {"error": f"Unknown tool: {name}"}
         try:
-            return self.tools[name](**kwargs)
-        except Exception as e:
-            log.error(f"Tool {name} error: {e}")
-            return {"error": str(e)}
-
-    def _execute_tool(self, name: str, tool_input: dict):
-        if name not in self.tools:
-            return {"error": f"Unknown tool: {name}"}
-        try:
-            result = self.tools[name](**tool_input)
-            if inspect.iscoroutine(result):
-                import asyncio
-                import concurrent.futures
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        with concurrent.futures.ThreadPoolExecutor() as pool:
-                            future = pool.submit(asyncio.run, result)
-                            result = future.result(timeout=30)
-                    else:
-                        result = loop.run_until_complete(result)
-                except Exception as e:
-                    return {"error": f"Async tool error: {e}"}
+            result = self.tools[name](**kwargs)
             return result
         except Exception as e:
-            log.error(f"Tool {name} execution error: {e}")
+            log.error(f"Tool {name} raised: {e}")
             return {"error": str(e)}
 
-    def resolve_provider(self, user_id: int, intent: str = "default") -> str:
-        if user_id in self.user_provider:
-            return self.user_provider[user_id]
-        return INTENT_PROVIDER.get(intent, "groq")
-
-    def set_provider(self, user_id: int, provider: str):
-        if provider not in PROVIDERS:
-            raise ValueError(f"Unknown provider: {provider}")
-        self.user_provider[user_id] = provider
-
-    def _available_providers(self) -> list[str]:
-        available = []
-        if self.groq_key:
-            available.append("groq")
-        if os.getenv("ANTHROPIC_API_KEY"):
-            available.append("claude")
-        if self.openai:
-            available.append("openai")
-        return available
-
-    def chat(self, user_id: int, message: str, intent: str = "default") -> str:
-        preferred = self.resolve_provider(user_id, intent)
+    def chat(self, user_id: int, message: str, provider: str = None) -> str:
+        provider = provider or self.user_provider.get(user_id) or INTENT_PROVIDER.get("default", "claude")
         history = self.history.setdefault(user_id, [])
         history.append({"role": "user", "content": message})
 
-        # Keep history short to avoid payload limits
-        if len(history) > 10:
-            self.history[user_id] = history[-10:]
-            history = self.history[user_id]
-
-        available = self._available_providers()
-        if not available:
-            return "No API keys configured. Add GROQ_API_KEY to Render environment."
-
-        order = [preferred] + [p for p in PROVIDERS if p != preferred and p in available]
-        order = [p for p in order if p in available]
-
-        for p in order:
-            try:
-                reply = self._call(p, list(history))
-                history.append({"role": "assistant", "content": reply})
-                return reply
-            except Exception as e:
-                log.warning(f"Provider {p} failed: {e}")
-
-        return "All providers failed. Check API keys in Render environment."
-
-    def _call(self, provider: str, history: list) -> str:
         if provider == "groq":
-            return self._call_groq(history)
-        elif provider == "claude":
-            return self._call_claude(history)
+            return self._chat_groq(user_id, history)
         elif provider == "openai":
-            return self._call_openai(history)
-        raise ValueError(f"Unknown provider: {provider}")
+            return self._chat_openai(user_id, history)
+        else:
+            return self._chat_claude(user_id, history)
 
-    def _call_groq(self, history: list) -> str:
+    def _chat_groq(self, user_id: int, history: list) -> str:
         if not self.groq_key:
-            raise RuntimeError("GROQ_API_KEY not set")
-        tool_list = "\n".join(
-            f"- {name}" for name in self.tools
-            if name not in EXCLUDE_FROM_CLAUDE_TOOLS
-        )
-        groq_system = self.system_prompt + f"\n\nAvailable tools:\n{tool_list}"
-
-        # Trim history content to avoid 413
-        trimmed = []
-        for msg in history[-6:]:  # Only last 6 messages
-            content = msg["content"]
-            if isinstance(content, str) and len(content) > 1000:
-                content = content[:1000] + "...[truncated]"
-            trimmed.append({"role": msg["role"], "content": content})
-
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {self.groq_key}"},
-            json={
-                "model": GROQ_MODELS["fast"],
-                "messages": [{"role": "system", "content": groq_system}] + trimmed,
-                "max_tokens": 2048,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-
-    def _call_claude(self, history: list) -> str:
-        claude_tools = build_claude_tools(self.tools)
-        messages = list(history)
-        max_rounds = 5
-        tools_called = set()
-
-        for round_num in range(max_rounds):
-            kwargs = {
-                "model": "claude-sonnet-4-6",
-                "max_tokens": 4096,
-                "system": self.system_prompt,
-                "messages": messages,
+            return self._chat_claude(user_id, history)
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.groq_key}",
+                "Content-Type": "application/json",
             }
-            if claude_tools:
-                kwargs["tools"] = claude_tools
+            messages = [{"role": "system", "content": self.system_prompt}] + history
+            payload = {
+                "model": GROQ_MODELS["fast"],
+                "messages": messages,
+                "max_tokens": 1024,
+            }
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            reply = data["choices"][0]["message"]["content"]
+            self.history[user_id].append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as e:
+            log.warning(f"Groq failed, falling back to Claude: {e}")
+            return self._chat_claude(user_id, history)
 
-            resp = self.anthropic_client.messages.create(**kwargs)
+    def _chat_openai(self, user_id: int, history: list) -> str:
+        if not self.openai:
+            return self._chat_claude(user_id, history)
+        try:
+            messages = [{"role": "system", "content": self.system_prompt}] + history
+            resp = self.openai.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                max_tokens=1024,
+            )
+            reply = resp.choices[0].message.content
+            self.history[user_id].append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as e:
+            log.warning(f"OpenAI failed, falling back to Claude: {e}")
+            return self._chat_claude(user_id, history)
 
-            if resp.stop_reason == "end_turn":
-                for block in resp.content:
-                    if hasattr(block, "text"):
-                        return block.text
-                return "Done."
+    def _chat_claude(self, user_id: int, history: list) -> str:
+        try:
+            claude_tools = build_claude_tools(self.tools)
+            messages = list(history)
 
-            elif resp.stop_reason == "tool_use":
+            while True:
+                kwargs = dict(
+                    model="claude-sonnet-4-5",
+                    max_tokens=4096,
+                    system=self.system_prompt,
+                    messages=messages,
+                )
+                if claude_tools:
+                    kwargs["tools"] = claude_tools
+
+                resp = self.anthropic_client.messages.create(**kwargs)
+
+                # Collect all text and tool_use blocks
+                tool_calls = [b for b in resp.content if b.type == "tool_use"]
+                text_blocks = [b for b in resp.content if b.type == "text"]
+
+                if not tool_calls:
+                    reply = text_blocks[0].text if text_blocks else ""
+                    self.history[user_id].append({"role": "assistant", "content": reply})
+                    return reply
+
+                # Append assistant message with all content blocks
+                messages.append({"role": "assistant", "content": resp.content})
+
+                # Execute all tool calls and collect results
                 tool_results = []
-                assistant_content = resp.content
+                for tool_call in tool_calls:
+                    tool_name = tool_call.name
+                    tool_input = tool_call.input
+                    log.info(f"Tool call: {tool_name}({tool_input})")
+                    try:
+                        result = self.run_tool(tool_name, **tool_input)
+                    except Exception as e:
+                        result = {"error": str(e)}
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call.id,
+                        "content": json.dumps(result) if not isinstance(result, str) else result,
+                    })
 
-                for block in resp.content:
-                    if block.type == "tool_use":
-                        tool_name = block.name
-                        tool_input = block.input
-                        tool_use_id = block.id
-
-                        call_key = f"{tool_name}:{str(tool_input)[:100]}"
-                        if call_key in tools_called:
-                            result = {"error": f"Duplicate call blocked: {tool_name}"}
-                        else:
-                            tools_called.add(call_key)
-                            log.info(f"Claude calling tool: {tool_name}({tool_input})")
-                            result = self._execute_tool(tool_name, tool_input)
-
-                        result_str = json.dumps(result, default=str) if isinstance(result, dict) else str(result)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_id,
-                            "content": result_str,
-                        })
-
-                messages.append({"role": "assistant", "content": assistant_content})
                 messages.append({"role": "user", "content": tool_results})
 
-            else:
-                for block in resp.content:
-                    if hasattr(block, "text"):
-                        return block.text
-                return f"Stopped: {resp.stop_reason}"
+        except Exception as e:
+            log.error(f"Claude failed: {e}")
+            return f"❌ Error: {e}"
 
-        messages.append({"role": "user", "content": "Summarize what you did."})
-        final = self.anthropic_client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=self.system_prompt,
-            messages=messages,
-        )
-        for block in final.content:
-            if hasattr(block, "text"):
-                return block.text
-        return "Completed."
+    def set_provider(self, user_id: int, provider: str) -> str:
+        if provider not in PROVIDERS:
+            return f"Unknown provider: {provider}. Choose from {PROVIDERS}"
+        self.user_provider[user_id] = provider
+        return f"✅ Provider set to {provider} for user {user_id}"
 
-    def _call_openai(self, history: list) -> str:
-        if not self.openai:
-            raise RuntimeError("OPENAI_API_KEY not set")
-        resp = self.openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "system", "content": self.system_prompt}] + history,
-            max_tokens=2048,
-        )
-        return resp.choices[0].message.content
-
-    def clear_history(self, user_id: int):
-        self.history.pop(user_id, None)
+    def clear_history(self, user_id: int) -> str:
+        self.history[user_id] = []
+        return f"✅ History cleared for user {user_id}"
