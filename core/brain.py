@@ -7,12 +7,15 @@ Optional: OpenAI (gpt-4o)
 
 NEW: Auto-recall relevant memories before each response
      Auto-store interactions after each response
+     Sync AND async tool functions now both supported
 """
 
 import os
 import json
 import logging
 import inspect
+import asyncio
+import concurrent.futures
 import anthropic
 import requests
 from openai import OpenAI
@@ -121,11 +124,37 @@ class Brain:
     def register_extension(self, name: str, fn: callable):
         self.register_tool(name, fn)
 
+    def _run_async(self, coro):
+        """
+        Run an awaitable to completion, whether or not we're already
+        inside a running event loop (e.g. called from within an async
+        Telegram/FastAPI handler).
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Already inside an event loop on this thread — can't call
+            # asyncio.run() here, so run the coroutine in a fresh thread
+            # with its own loop instead.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            return asyncio.run(coro)
+
     def run_tool(self, name: str, **kwargs):
         if name not in self.tools:
             return {"error": f"Unknown tool: {name}"}
         try:
-            result = self.tools[name](**kwargs)
+            fn = self.tools[name]
+            result = fn(**kwargs)
+            # If the tool is async, fn(**kwargs) just built a coroutine —
+            # it hasn't actually run yet. Execute it now.
+            if inspect.isawaitable(result):
+                result = self._run_async(result)
             return result
         except Exception as e:
             log.error(f"Tool {name} raised: {e}")
