@@ -1,215 +1,142 @@
 """
 JARVIS Guardrail System
-=======================
-Auto-rollback, syntax checking, and safety gates before any self-edit is applied.
-Phase 1 — Step 5
+Protects against bad code edits with syntax checks, backups, and auto-rollback.
 """
 
-import os
 import ast
+import os
 import shutil
 import hashlib
 import datetime
-import traceback
-from pathlib import Path
+import json
 
-BACKUP_DIR = Path("extensions/.guardrail_backups")
-LOG_FILE = Path("extensions/guardrail_log.txt")
-MAX_BACKUPS = 20
+BACKUP_DIR = "/tmp/jarvis_backups"
+LOG_FILE = "/tmp/jarvis_guardrail_log.json"
 
-
-# ─────────────────────────────────────────────
-# 1. Logging
-# ─────────────────────────────────────────────
-
-def _log(message: str):
-    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %Human:%M:%S UTC")
-    entry = f"[{timestamp}] {message}\n"
-    try:
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(LOG_FILE, "a") as f:
-            f.write(entry)
-    except Exception:
-        pass
-    print(entry.strip())
+os.makedirs(BACKUP_DIR, exist_ok=True)
 
 
-# ─────────────────────────────────────────────
-# 2. Syntax Check
-# ─────────────────────────────────────────────
-
-def syntax_check(code: str, filename: str = "<unknown>") -> dict:
-    """
-    Parse Python source for syntax errors before writing.
-    Returns: {"ok": bool, "error": str or None}
-    """
+def syntax_check(code: str) -> dict:
+    """Check Python code for syntax errors before writing."""
     try:
         ast.parse(code)
-        _log(f"SYNTAX OK: {filename}")
         return {"ok": True, "error": None}
     except SyntaxError as e:
-        msg = f"SyntaxError in {filename} at line {e.lineno}: {e.msg}"
-        _log(f"SYNTAX FAIL: {msg}")
-        return {"ok": False, "error": msg}
+        return {"ok": False, "error": str(e)}
 
-
-# ─────────────────────────────────────────────
-# 3. Backup
-# ─────────────────────────────────────────────
 
 def backup_file(filepath: str) -> dict:
-    """
-    Create a timestamped backup of a file before editing.
-    Returns: {"ok": bool, "backup_path": str or None, "error": str or None}
-    """
-    src = Path(filepath)
-    if not src.exists():
-        _log(f"BACKUP SKIP: {filepath} does not exist yet (new file)")
-        return {"ok": True, "backup_path": None, "error": None}
+    """Backup a file before editing it."""
+    if not os.path.exists(filepath):
+        return {"ok": False, "error": f"File not found: {filepath}"}
 
-    try:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"{src.stem}__{ts}{src.suffix}"
-        backup_path = BACKUP_DIR / backup_name
-        shutil.copy2(src, backup_path)
-        _log(f"BACKUP OK: {filepath} → {backup_path}")
-        _prune_backups()
-        return {"ok": True, "backup_path": str(backup_path), "error": None}
-    except Exception as e:
-        msg = f"Backup failed for {filepath}: {e}"
-        _log(f"BACKUP FAIL: {msg}")
-        return {"ok": False, "backup_path": None, "error": msg}
+    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.basename(filepath)
+    backup_path = os.path.join(BACKUP_DIR, f"{filename}.{timestamp}.bak")
 
+    shutil.copy2(filepath, backup_path)
+    _log_event("backup", filepath, backup_path)
 
-def _prune_backups():
-    """Keep only the last MAX_BACKUPS backups."""
-    try:
-        files = sorted(BACKUP_DIR.glob("*"), key=lambda f: f.stat().st_mtime)
-        while len(files) > MAX_BACKUPS:
-            files.pop(0).unlink()
-    except Exception:
-        pass
+    return {"ok": True, "backup_path": backup_path, "timestamp": timestamp}
 
-
-# ─────────────────────────────────────────────
-# 4. Rollback
-# ─────────────────────────────────────────────
 
 def rollback_file(filepath: str) -> dict:
-    """
-    Restore the most recent backup of a file.
-    Returns: {"ok": bool, "restored_from": str or None, "error": str or None}
-    """
-    src = Path(filepath)
-    try:
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        candidates = sorted(
-            BACKUP_DIR.glob(f"{src.stem}__*{src.suffix}"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True
-        )
-        if not candidates:
-            msg = f"No backup found for {filepath}"
-            _log(f"ROLLBACK FAIL: {msg}")
-            return {"ok": False, "restored_from": None, "error": msg}
+    """Restore the most recent backup of a file."""
+    filename = os.path.basename(filepath)
+    backups = sorted([
+        f for f in os.listdir(BACKUP_DIR)
+        if f.startswith(filename) and f.endswith(".bak")
+    ], reverse=True)
 
-        latest = candidates[0]
-        shutil.copy2(latest, src)
-        _log(f"ROLLBACK OK: {filepath} ← {latest}")
-        return {"ok": True, "restored_from": str(latest), "error": None}
-    except Exception as e:
-        msg = f"Rollback failed for {filepath}: {traceback.format_exc()}"
-        _log(f"ROLLBACK FAIL: {msg}")
-        return {"ok": False, "restored_from": None, "error": msg}
+    if not backups:
+        return {"ok": False, "error": f"No backups found for {filename}"}
 
+    latest_backup = os.path.join(BACKUP_DIR, backups[0])
+    shutil.copy2(latest_backup, filepath)
+    _log_event("rollback", filepath, latest_backup)
 
-# ─────────────────────────────────────────────
-# 5. Safe Write Gate
-# ─────────────────────────────────────────────
+    return {"ok": True, "restored_from": latest_backup}
+
 
 def safe_write(filepath: str, code: str) -> dict:
-    """
-    Full guardrail pipeline:
-      1. Syntax check
-      2. Backup existing file
-      3. Write new file
-      4. Auto-rollback if write fails
-
-    Returns: {"ok": bool, "stage": str, "error": str or None}
-    """
-    # Stage 1: Syntax
-    check = syntax_check(code, filepath)
+    """Full safe pipeline: syntax check → backup → write → rollback if fail."""
+    # Step 1: Syntax check
+    check = syntax_check(code)
     if not check["ok"]:
         return {"ok": False, "stage": "syntax_check", "error": check["error"]}
 
-    # Stage 2: Backup
-    bak = backup_file(filepath)
-    if not bak["ok"]:
-        return {"ok": False, "stage": "backup", "error": bak["error"]}
+    # Step 2: Backup existing file
+    if os.path.exists(filepath):
+        backup = backup_file(filepath)
+        if not backup["ok"]:
+            return {"ok": False, "stage": "backup", "error": backup["error"]}
+        backup_path = backup["backup_path"]
+    else:
+        backup_path = None
 
-    # Stage 3: Write
+    # Step 3: Write new file
     try:
-        path = Path(filepath)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open(filepath, "w") as f:
             f.write(code)
-        _log(f"WRITE OK: {filepath}")
-        return {"ok": True, "stage": "write", "error": None}
+        _log_event("write", filepath, "success")
+        return {"ok": True, "written": filepath, "backup": backup_path}
     except Exception as e:
-        _log(f"WRITE FAIL: {filepath} — triggering rollback")
-        rollback_file(filepath)
-        return {"ok": False, "stage": "write", "error": str(e)}
+        # Step 4: Auto-rollback on failure
+        if backup_path:
+            rollback_file(filepath)
+            return {"ok": False, "stage": "write", "error": str(e), "rolled_back": True}
+        return {"ok": False, "stage": "write", "error": str(e), "rolled_back": False}
 
 
-# ─────────────────────────────────────────────
-# 6. Checksum Verification
-# ─────────────────────────────────────────────
+def file_checksum(filepath: str) -> dict:
+    """Return SHA256 checksum of a file."""
+    if not os.path.exists(filepath):
+        return {"ok": False, "error": f"File not found: {filepath}"}
 
-def file_checksum(filepath: str) -> str:
-    """Return SHA256 hash of a file for integrity checks."""
-    try:
-        with open(filepath, "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except Exception:
-        return "ERROR"
+    sha256 = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            sha256.update(chunk)
 
+    return {"ok": True, "filepath": filepath, "sha256": sha256.hexdigest()}
 
-# ─────────────────────────────────────────────
-# 7. Status Report
-# ─────────────────────────────────────────────
 
 def guardrail_status() -> dict:
     """Return current guardrail system status."""
-    backups = list(BACKUP_DIR.glob("*")) if BACKUP_DIR.exists() else []
-    last_log_lines = []
-    if LOG_FILE.exists():
-        with open(LOG_FILE) as f:
-            last_log_lines = f.readlines()[-10:]
+    backups = os.listdir(BACKUP_DIR) if os.path.exists(BACKUP_DIR) else []
+    logs = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            logs = json.load(f)
 
     return {
         "backup_count": len(backups),
-        "backup_dir": str(BACKUP_DIR),
-        "log_file": str(LOG_FILE),
-        "last_10_log_entries": [l.strip() for l in last_log_lines],
-        "max_backups": MAX_BACKUPS,
-        "status": "ACTIVE"
+        "backup_dir": BACKUP_DIR,
+        "recent_logs": logs[-5:] if logs else [],
+        "status": "active"
     }
 
 
-# ─────────────────────────────────────────────
-# Quick test
-# ─────────────────────────────────────────────
+def _log_event(event_type: str, filepath: str, detail: str):
+    """Internal: log guardrail events."""
+    logs = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            try:
+                logs = json.load(f)
+            except Exception:
+                logs = []
+
+    logs.append({
+        "type": event_type,
+        "file": filepath,
+        "detail": detail,
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    })
+
+    with open(LOG_FILE, "w") as f:
+        json.dump(logs[-100:], f, indent=2)
+
+
 if __name__ == "__main__":
-    print("=== JARVIS Guardrail Self-Test ===")
-
-    # Test syntax check (good code)
-    result = syntax_check("x = 1 + 1", "test_good.py")
-    print("Good code:", result)
-
-    # Test syntax check (bad code)
-    result = syntax_check("def broken(:\n    pass", "test_bad.py")
-    print("Bad code:", result)
-
-    # Status
-    print("Status:", guardrail_status())
+    print(json.dumps(guardrail_status(), indent=2))
