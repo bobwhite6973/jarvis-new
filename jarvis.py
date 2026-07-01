@@ -1,6 +1,6 @@
 """
 JARVIS Mark 5 — Bob White Edition
-Entry point. Loads extensions, starts brain, starts Telegram bot + web dashboard.
+Entry point. Loads extensions, starts brain, starts web dashboard.
 """
 import os
 import sys
@@ -45,25 +45,17 @@ async def main():
     extensions = load_extensions(brain)
     log.info(f"Loaded {len(extensions)} extensions: {extensions}")
 
-    # Wire brain into API
     from core.api import app, set_brain
     set_brain(brain)
 
-    # Start FastAPI
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
     server = uvicorn.Server(config)
 
-    # Start Telegram bot
-    from core.telegram_bot import start_telegram_bot
-
     log.info(f"Dashboard running on port {port}")
 
-    await asyncio.gather(
-        server.serve(),
-        start_telegram_bot(brain),
-    )
+    await server.serve()
 
 
 if __name__ == "__main__":
