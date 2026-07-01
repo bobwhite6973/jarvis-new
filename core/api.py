@@ -37,19 +37,26 @@ def set_brain(brain):
     _brain = brain
 
 
-async def run_tool(name: str, **kwargs):
-    """Run a tool — handles both sync and async tools."""
+async def run_tool(tool_name: str, **kwargs):
+    """Run a tool — handles both sync and async tools.
+
+    NOTE: parameter renamed from `name` -> `tool_name` to avoid colliding
+    with tool functions (like create_repo) that themselves accept a
+    `name` keyword argument. Previously this caused:
+        TypeError: run_tool() got multiple values for argument 'name'
+    whenever a tool's own kwargs included a `name` key.
+    """
     if not _brain:
         return {"error": "Brain not initialized"}
-    if name not in _brain.tools:
-        return {"error": f"Tool not found: {name}"}
+    if tool_name not in _brain.tools:
+        return {"error": f"Tool not found: {tool_name}"}
     try:
-        result = _brain.tools[name](**kwargs)
+        result = _brain.tools[tool_name](**kwargs)
         if inspect.iscoroutine(result):
             result = await result
         return result
     except Exception as e:
-        log.error(f"Tool {name} error: {e}")
+        log.error(f"Tool {tool_name} error: {e}")
         return {"error": str(e)}
 
 
@@ -131,7 +138,7 @@ async def chat_with_tools(user_id: int, message: str, max_rounds: int = 3) -> st
     return strip_tool_calls(reply)
 
 
-# ── Request models ──────────────────────────────────────────────
+# ── Request models ─────────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
     user_id: int = 1
@@ -172,7 +179,7 @@ async def api_transcribe(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Chat endpoint ────────────────────────────────────────────────
+# ── Chat endpoint ─────────────────────────────────────────────
 
 @app.post("/api/chat")
 async def api_chat(req: ChatRequest):
@@ -223,7 +230,7 @@ async def api_chat(req: ChatRequest):
     return {"reply": reply}
 
 
-# ── Status / utility endpoints ───────────────────────────────────
+# ── Status / utility endpoints ─────────────────────────────────
 
 @app.get("/api/sol")
 async def api_sol():
@@ -282,7 +289,7 @@ async def api_github():
     return result
 
 
-# ── Dashboard ────────────────────────────────────────────────────
+# ── Dashboard ─────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
