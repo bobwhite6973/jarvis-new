@@ -1,7 +1,7 @@
 """
 Shared database utility for JARVIS extensions.
-Uses Supabase (Postgres) as primary connection with hardcoded credentials.
-Falls back to SQLite only if Postgres connection fails.
+Uses Postgres (via DATABASE_URL env var) as primary connection.
+Falls back to SQLite only if DATABASE_URL is not set or connection fails.
 
 Usage:
     from extensions.db import get_conn, DB_TYPE
@@ -13,36 +13,38 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.db")
 
-# Hardcoded Supabase connection (always works)
-SUPABASE_URL = "postgresql://postgres:153Etr23!Bob@db.nfmpvdnjipuwhksckayg.supabase.co:5432/postgres"
-
-# Allow override via environment variable
-DATABASE_URL = os.environ.get("DATABASE_URL", SUPABASE_URL)
+# No hardcoded credentials — must be provided via environment variable.
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 # SQLite fallback path
 SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
 
-DB_TYPE = "postgres"  # Default to postgres since we have hardcoded credentials
+DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
 
 
 def get_conn():
     """
     Returns a database connection.
-    - Postgres (Supabase) as primary (hardcoded credentials)
-    - SQLite fallback only if connection fails
+    - Postgres if DATABASE_URL env var is set and connection succeeds
+    - SQLite fallback if DATABASE_URL is missing or connection fails
     """
-    try:
-        import psycopg2
-        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-        log.debug("Connected to Postgres (Supabase)")
-        return conn
-    except ImportError:
-        log.error("psycopg2 not installed — falling back to SQLite")
-    except Exception as e:
-        log.error("Postgres connection failed: %s — falling back to SQLite", e)
-
-    # SQLite fallback only if Postgres fails
     global DB_TYPE
+
+    if DATABASE_URL:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+            DB_TYPE = "postgres"
+            log.debug("Connected to Postgres")
+            return conn
+        except ImportError:
+            log.error("psycopg2 not installed — falling back to SQLite")
+        except Exception as e:
+            log.error("Postgres connection failed: %s — falling back to SQLite", e)
+    else:
+        log.warning("DATABASE_URL not set — falling back to SQLite")
+
+    # SQLite fallback
     DB_TYPE = "sqlite"
     import sqlite3
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
