@@ -1,62 +1,69 @@
 """
-JARVIS Health Monitor Extension
-Phase 1 - Self-editing capability test + system health check
-Written by JARVIS autonomously
+JARVIS Health Monitor — Phase 1
+Monitors system status and reports back to Bob.
+Standalone extension — no core files touched.
 """
 
 import datetime
 import platform
-import sys
-import os
+import psutil
 
-def health_monitor(_query: str = "") -> dict:
+
+def get_health_report() -> dict:
     """
-    Returns a full health report of the JARVIS system.
-    Checks: uptime, Python version, memory, environment, timestamp.
+    Returns a snapshot of JARVIS system health.
+    CPU, memory, disk, uptime, and timestamp.
     """
-    report = {
-        "status": "✅ JARVIS is alive and healthy",
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-        "python_version": sys.version,
-        "platform": platform.system(),
-        "platform_version": platform.version(),
-        "phase": "Phase 1 - Self-editing capability CONFIRMED",
-        "checks": {
-            "python": "✅ Running",
-            "environment": "✅ ENV accessible",
-            "extensions": "✅ Health monitor loaded",
-            "self_edit": "✅ JARVIS wrote and deployed this file autonomously",
-        },
-        "next_steps": [
-            "Add guardrails and auto rollback",
-            "Add backup instance",
-            "JARVIS never dies protocol",
-            "Wire Phase 2 - Siri Replacement"
-        ]
-    }
+    try:
+        cpu = psutil.cpu_percent(interval=1)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        boot_time = datetime.datetime.fromtimestamp(psutil.boot_time())
+        uptime = datetime.datetime.now() - boot_time
 
-    # Check for key environment variables (without exposing values)
-    env_keys = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "OPENAI_API_KEY", "TELEGRAM_TOKEN"]
-    env_status = {}
-    for key in env_keys:
-        env_status[key] = "✅ Set" if os.environ.get(key) else "❌ Missing"
-    report["environment_keys"] = env_status
+        return {
+            "status": "online",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "uptime_hours": round(uptime.total_seconds() / 3600, 2),
+            "cpu_percent": cpu,
+            "memory_used_percent": mem.percent,
+            "memory_used_gb": round(mem.used / 1e9, 2),
+            "memory_total_gb": round(mem.total / 1e9, 2),
+            "disk_used_percent": disk.percent,
+            "disk_free_gb": round(disk.free / 1e9, 2),
+            "platform": platform.system(),
+            "python_version": platform.python_version(),
+        }
 
-    return report
+    except Exception as e:
+        return {
+            "status": "error",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "error": str(e),
+        }
 
 
-# Tool manifest for JARVIS brain to auto-register
-TOOL_MANIFEST = {
-    "name": "health_monitor",
-    "description": "Check JARVIS system health, uptime, environment variables, and phase status. Call this to confirm JARVIS is running correctly.",
-    "function": health_monitor,
-    "parameters": {
-        "properties": {
-            "_query": {
-                "description": "Optional query string",
-                "type": "string"
-            }
-        },
-        "required": []
-    }
-}
+def health_summary() -> str:
+    """
+    Returns a human-readable health summary for JARVIS to report to Bob.
+    """
+    r = get_health_report()
+
+    if r["status"] == "error":
+        return f"⚠️ Health check failed: {r['error']}"
+
+    lines = [
+        "🟢 JARVIS Health Report",
+        f"⏱️  Uptime: {r['uptime_hours']} hours",
+        f"🖥️  CPU: {r['cpu_percent']}%",
+        f"🧠 Memory: {r['memory_used_percent']}% ({r['memory_used_gb']} / {r['memory_total_gb']} GB)",
+        f"💾 Disk: {r['disk_used_percent']}% used — {r['disk_free_gb']} GB free",
+        f"🐍 Python: {r['python_version']} on {r['platform']}",
+        f"🕐 Checked: {r['timestamp']}",
+    ]
+
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    print(health_summary())
