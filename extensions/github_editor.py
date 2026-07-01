@@ -9,7 +9,7 @@ Guardrails:
 4. Scope limits — extensions/ folder only by default
 
 Tools registered:
-  commit_file(repo, path, content, message) — sync wrapper, pushes to jarvis-changes
+  commit_file(repo, path, content, message) — pushes to jarvis-changes
   propose_change(path, content, reason) — propose with approval gate
   read_file(path) — read file from repo
   list_extensions() — list extensions folder
@@ -18,15 +18,14 @@ Tools registered:
 import os
 import ast
 import base64
-import asyncio
 import logging
-import concurrent.futures
 import requests
 
 log = logging.getLogger("jarvis.ext.github_editor")
 
 GITHUB_API = "https://api.github.com"
-REPO = "bobwhite6973/jarvis-new"
+DEFAULT_OWNER = "bobwhite6973"
+DEFAULT_REPO = "bobwhite6973/jarvis-new"
 BRANCH = "jarvis-changes"
 ALLOWED_PATHS = ["extensions/"]
 
@@ -47,35 +46,20 @@ def _headers() -> dict:
     }
 
 
-def _ensure_branch() -> bool:
-    """Create jarvis-changes branch if it doesn't exist."""
-    try:
-        resp = requests.get(
-            f"{GITHUB_API}/repos/{REPO}/git/ref/heads/main",
-            headers=_headers(), timeout=10
-        )
-        if resp.status_code != 200:
-            log.error(f"Could not get main branch: {resp.text}")
-            return False
-        main_sha = resp.json()["object"]["sha"]
-        resp = requests.post(
-            f"{GITHUB_API}/repos/{REPO}/git/refs",
-            headers=_headers(),
-            json={"ref": f"refs/heads/{BRANCH}", "sha": main_sha},
-            timeout=10
-        )
-        return resp.status_code in (201, 422)
-    except Exception as e:
-        log.error(f"_ensure_branch error: {e}")
-        return False
+def _full_repo(repo: str) -> str:
+    """Ensure repo has owner prefix."""
+    if "/" not in repo:
+        return f"{DEFAULT_OWNER}/{repo}"
+    return repo
 
 
 def _get_file_sha(repo: str, path: str) -> str | None:
     """Get SHA of existing file for updates."""
+    full = _full_repo(repo)
     for branch in [BRANCH, "main"]:
         try:
             resp = requests.get(
-                f"{GITHUB_API}/repos/{repo}/contents/{path}",
+                f"{GITHUB_API}/repos/{full}/contents/{path}",
                 headers=_headers(),
                 params={"ref": branch},
                 timeout=10
@@ -88,11 +72,12 @@ def _get_file_sha(repo: str, path: str) -> str | None:
 
 
 def read_file(path: str) -> dict:
-    """Read file contents from repo."""
+    """Read file contents from jarvis-new repo."""
+    full = DEFAULT_REPO
     for branch in [BRANCH, "main"]:
         try:
             resp = requests.get(
-                f"{GITHUB_API}/repos/{REPO}/contents/{path}",
+                f"{GITHUB_API}/repos/{full}/contents/{path}",
                 headers=_headers(),
                 params={"ref": branch},
                 timeout=10
@@ -110,8 +95,10 @@ def commit_file(repo: str, path: str, content: str, message: str) -> dict:
     """
     Push a file to jarvis-changes branch.
     Syntax-checks Python files before pushing.
-    Uses synchronous requests — safe to call from Mark 5 brain.
+    repo can be short name (jarvis-new) or full (bobwhite6973/jarvis-new).
     """
+    full_repo = _full_repo(repo)
+
     # Syntax check Python files
     if path.endswith(".py"):
         try:
@@ -119,12 +106,8 @@ def commit_file(repo: str, path: str, content: str, message: str) -> dict:
         except SyntaxError as e:
             return {"error": f"Syntax error in {path} line {e.lineno}: {e.msg}"}
 
-    # Ensure branch exists
-    if not _ensure_branch():
-        return {"error": "Could not create/access jarvis-changes branch"}
-
-    # Get existing SHA if file exists
-    sha = _get_file_sha(repo, path)
+    # Get existing SHA if file exists (needed for updates)
+    sha = _get_file_sha(full_repo, path)
 
     payload = {
         "message": f"[JARVIS] {message}",
@@ -135,8 +118,10 @@ def commit_file(repo: str, path: str, content: str, message: str) -> dict:
         payload["sha"] = sha
 
     try:
+        url = f"{GITHUB_API}/repos/{full_repo}/contents/{path}"
+        log.info(f"commit_file: PUT {url} branch={BRANCH}")
         resp = requests.put(
-            f"{GITHUB_API}/repos/{repo}/contents/{path}",
+            url,
             headers=_headers(),
             json=payload,
             timeout=15
@@ -146,10 +131,12 @@ def commit_file(repo: str, path: str, content: str, message: str) -> dict:
             return {
                 "ok": True,
                 "path": path,
+                "repo": full_repo,
                 "branch": BRANCH,
                 "sha": commit_sha,
                 "message": f"Committed to '{BRANCH}' branch. Merge into main on GitHub to deploy."
             }
+        log.error(f"commit_file failed: {resp.status_code} {resp.text[:300]}")
         return {"error": f"Push failed {resp.status_code}: {resp.text[:300]}"}
     except Exception as e:
         return {"error": str(e)}
@@ -186,7 +173,7 @@ def approve_change() -> str:
     global _pending
     if not _pending["path"]:
         return "No pending change to approve."
-    result = commit_file(REPO, _pending["path"], _pending["content"], _pending["message"])
+    result = commit_file(DEFAULT_REPO, _pending["path"], _pending["content"], _pending["message"])
     if result.get("ok"):
         path = _pending["path"]
         _pending = {"path": None, "content": None, "message": None, "sha": None}
@@ -212,7 +199,7 @@ def get_diff() -> str:
 def rollback() -> str:
     try:
         resp = requests.get(
-            f"{GITHUB_API}/repos/{REPO}/commits",
+            f"{GITHUB_API}/repos/{DEFAULT_REPO}/commits",
             headers=_headers(),
             params={"sha": BRANCH, "per_page": 10},
             timeout=10
@@ -232,7 +219,7 @@ def rollback() -> str:
 def list_extensions() -> dict:
     try:
         resp = requests.get(
-            f"{GITHUB_API}/repos/{REPO}/contents/extensions",
+            f"{GITHUB_API}/repos/{DEFAULT_REPO}/contents/extensions",
             headers=_headers(),
             timeout=10
         )
