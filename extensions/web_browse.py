@@ -1,0 +1,72 @@
+"""
+Extension: web_browse
+Fetches and reads any URL — gives JARVIS the ability to browse the web.
+Fixed: renamed from web_browse,py (comma typo) to web_browse.py
+"""
+import logging
+import requests
+from html.parser import HTMLParser
+
+log = logging.getLogger("jarvis.web_browse")
+
+
+class TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.text = []
+        self.skip = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script', 'style', 'nav', 'footer', 'head'):
+            self.skip = True
+
+    def handle_endtag(self, tag):
+        if tag in ('script', 'style', 'nav', 'footer', 'head'):
+            self.skip = False
+
+    def handle_data(self, data):
+        if not self.skip:
+            text = data.strip()
+            if text:
+                self.text.append(text)
+
+    def get_text(self):
+        return '\n'.join(self.text)
+
+
+def browse(url: str, max_chars: int = 4000) -> dict:
+    """Fetch a URL and return its text content."""
+    try:
+        if not url.startswith('http'):
+            url = 'https://' + url
+        resp = requests.get(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; JARVIS/5.0)'},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        content_type = resp.headers.get('content-type', '')
+
+        if 'html' in content_type:
+            parser = TextExtractor()
+            parser.feed(resp.text)
+            text = parser.get_text()
+        else:
+            text = resp.text
+
+        if len(text) > max_chars:
+            text = text[:max_chars] + '\n...[truncated]'
+
+        return {
+            "url": url,
+            "content": text,
+            "length": len(text),
+        }
+    except Exception as e:
+        log.error(f"Browse failed for {url}: {e}")
+        return {"error": str(e), "url": url}
+
+
+def register(brain):
+    brain.register_tool("browse", browse)
+    log.info("web_browse extension registered")
