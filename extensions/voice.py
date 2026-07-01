@@ -2,7 +2,7 @@
 Extension: voice
 Transcription: Groq Whisper (fast, free tier)
 TTS: ElevenLabs (Adam voice — deep, confident, natural)
-transcribe(audio_bytes) -> str
+transcribe(audio_bytes, filename) -> str
 speak(text) -> bytes (MP3 audio)
 """
 import os
@@ -22,6 +22,7 @@ GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 
 def transcribe(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
+    """Transcribe audio bytes to text using Groq Whisper."""
     if not GROQ_KEY:
         raise RuntimeError("GROQ_API_KEY not set — cannot transcribe")
     resp = requests.post(
@@ -36,6 +37,7 @@ def transcribe(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
 
 
 def speak(text: str) -> bytes:
+    """Convert text to MP3 speech using ElevenLabs Adam voice."""
     if not ELEVENLABS_KEY:
         raise RuntimeError("ELEVENLABS_API_KEY not set — cannot speak")
     if len(text) > 4096:
