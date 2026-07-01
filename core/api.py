@@ -237,7 +237,8 @@ async def sol_price():
 
 @app.get("/api/status")
 async def bot_status():
-    return await run_tool("bot_control")
+    return await run_tool("bot_control", query="show status")
+
 
 
 @app.get("/api/arb")
