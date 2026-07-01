@@ -37,15 +37,15 @@ SYSTEM_PROMPT = (
     "coding, GitHub repo management, and general tasks. "
     "Be concise and direct. When you use tools, summarize the results clearly.\n\n"
     "GITHUB RULES:\n"
-    "1. commit_file pushes to 'jarvis-changes' branch only — NOT main.\n"
+    "1. commit_file pushes to jarvis-changes, creates a PR, and auto-merges to main.\n"
     "2. Only commit files to extensions/ folder unless Bob says otherwise.\n"
     "3. When asked to write and commit code: write the code yourself, then call commit_file.\n"
-    "4. Do NOT call generate_code — write the code directly in your response.\n"
+    "4. Do NOT call generate_code — write the code directly.\n"
     "5. NEVER fabricate tool responses. Report actual results.\n"
-    "6. Call each tool at most once per response."
+    "6. You CAN call multiple different tools in one response — use them freely."
 )
 
-# Tools that cause recursion or should not be called by Claude's tool use API
+# Tools that cause recursion — excluded from Claude's tool use API
 EXCLUDE_FROM_CLAUDE_TOOLS = {
     "generate_code",
     "review_code",
@@ -57,6 +57,7 @@ EXCLUDE_FROM_CLAUDE_TOOLS = {
     "get_memory_context",
     "memory_store",
     "memory_recall",
+    "record_tool_call",
 }
 
 
@@ -196,17 +197,21 @@ class Brain:
         raise ValueError(f"Unknown provider: {provider}")
 
     def _call_claude(self, history: list) -> str:
-        """Claude with native tool use. Max 3 rounds to prevent infinite loops."""
+        """
+        Claude with native tool use.
+        Allows multiple different tools per response.
+        Blocks only exact duplicate calls (same tool + same args).
+        """
         claude_tools = build_claude_tools(self.tools)
         messages = list(history)
-        max_rounds = 3
-        tools_called = set()
+        max_rounds = 5
+        tools_called = set()  # tracks tool_name:args_hash to block exact duplicates
 
         for round_num in range(max_rounds):
             kwargs = {
                 "model": "claude-sonnet-4-6",
                 "max_tokens": 4096,
-                "system": SYSTEM_PROMPT,
+                "system": self.system_prompt,
                 "messages": messages,
             }
             if claude_tools:
@@ -230,12 +235,13 @@ class Brain:
                         tool_input = block.input
                         tool_use_id = block.id
 
-                        # Prevent calling same tool twice
-                        if tool_name in tools_called:
-                            log.warning(f"Tool {tool_name} called twice — stopping loop")
-                            result = {"error": f"Tool {tool_name} already called this round"}
+                        # Block only exact duplicate calls (same tool + same args)
+                        call_key = f"{tool_name}:{str(tool_input)[:100]}"
+                        if call_key in tools_called:
+                            log.warning(f"Duplicate call blocked: {tool_name}")
+                            result = {"error": f"Duplicate call blocked: {tool_name}"}
                         else:
-                            tools_called.add(tool_name)
+                            tools_called.add(call_key)
                             log.info(f"Claude calling tool: {tool_name}({tool_input})")
                             result = self._execute_tool(tool_name, tool_input)
 
@@ -257,13 +263,13 @@ class Brain:
                         return block.text
                 return f"Stopped: {resp.stop_reason}"
 
-        # Max rounds hit — get final text response
+        # Max rounds hit — get final summary
         log.warning("Tool loop hit max rounds — requesting final summary")
         messages.append({"role": "user", "content": "Summarize what you did and the results."})
         final = self.anthropic_client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
-            system=SYSTEM_PROMPT,
+            system=self.system_prompt,
             messages=messages,
         )
         for block in final.content:
@@ -278,7 +284,7 @@ class Brain:
             f"- {name}" for name in self.tools
             if name not in EXCLUDE_FROM_CLAUDE_TOOLS
         )
-        groq_system = SYSTEM_PROMPT + f"\n\nAvailable tools:\n{tool_list}"
+        groq_system = self.system_prompt + f"\n\nAvailable tools:\n{tool_list}"
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.groq_key}"},
@@ -297,7 +303,7 @@ class Brain:
             raise RuntimeError("OPENAI_API_KEY not set")
         resp = self.openai.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history,
+            messages=[{"role": "system", "content": self.system_prompt}] + history,
             max_tokens=2048,
         )
         return resp.choices[0].message.content
