@@ -43,7 +43,7 @@ def format_sol_price() -> str:
     """
     result = get_sol_price()
     return (
-        f"SOL/USD: ${result['price']:,.2f}"
+        f"SOL/USD: ${result['price']:.2f}"
         f"  |  {result['timestamp']}"
         f"  (source: {result['source']})"
     )
