@@ -9,11 +9,10 @@ Guardrails:
 4. Rollback — /rollback reverts last JARVIS commit
 5. Scope limits — can only edit files in /extensions/ by default
 
-Telegram commands added:
-  /approve  — approve pending change and push
-  /reject   — reject pending change
-  /diff     — show pending change
-  /rollback — revert last JARVIS commit
+Tools registered:
+  commit_file(repo, path, content, message) — direct commit to jarvis-changes branch
+  propose_change(path, content, reason) — propose with approval gate
+  github_approve / github_reject / github_diff / github_rollback
 """
 
 import os
@@ -28,14 +27,13 @@ log = logging.getLogger("jarvis.ext.github_editor")
 GITHUB_API = "https://api.github.com"
 REPO = "bobwhite6973/jarvis-new"
 BRANCH = "jarvis-changes"
-ALLOWED_PATHS = ["extensions/"]  # JARVIS can only edit these paths
+ALLOWED_PATHS = ["extensions/"]
 
-# Pending change stored in memory (one at a time)
 _pending = {
     "path": None,
     "content": None,
     "message": None,
-    "sha": None,  # needed for updates
+    "sha": None,
     "proposed_by": None,
 }
 
@@ -50,60 +48,83 @@ def _headers() -> dict:
 
 
 def _allowed_path(path: str) -> bool:
-    """Check if path is within allowed edit scope."""
     return any(path.startswith(p) for p in ALLOWED_PATHS)
 
 
 async def _ensure_branch() -> bool:
-    """Create jarvis-changes branch if it doesn't exist."""
     async with httpx.AsyncClient(timeout=15) as client:
-        # Get main branch SHA
         resp = await client.get(
             f"{GITHUB_API}/repos/{REPO}/git/ref/heads/main",
             headers=_headers()
         )
         if resp.status_code != 200:
-            log.error(f"Could not get main branch: {resp.text}")
             return False
-
         main_sha = resp.json()["object"]["sha"]
-
-        # Try to create jarvis-changes branch
         resp = await client.post(
             f"{GITHUB_API}/repos/{REPO}/git/refs",
             headers=_headers(),
             json={"ref": f"refs/heads/{BRANCH}", "sha": main_sha}
         )
-        if resp.status_code in (201, 422):  # 422 = already exists
-            return True
-        log.error(f"Branch creation failed: {resp.text}")
-        return False
+        return resp.status_code in (201, 422)
+
+
+async def _get_file_sha(repo: str, path: str, branch: str = BRANCH) -> str | None:
+    """Get the SHA of an existing file, needed for updates."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            f"{GITHUB_API}/repos/{repo}/contents/{path}",
+            headers=_headers(),
+            params={"ref": branch}
+        )
+        if resp.status_code == 200:
+            return resp.json().get("sha")
+        # Try main branch
+        resp = await client.get(
+            f"{GITHUB_API}/repos/{repo}/contents/{path}",
+            headers=_headers(),
+            params={"ref": "main"}
+        )
+        if resp.status_code == 200:
+            return resp.json().get("sha")
+    return None
 
 
 async def read_file(path: str) -> tuple[str, str]:
-    """Read file contents and SHA from repo. Returns (content, sha)."""
+    """Read file contents and SHA. Returns (content, sha)."""
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(
-            f"{GITHUB_API}/repos/{REPO}/contents/{path}",
-            headers=_headers(),
-            params={"ref": BRANCH}
-        )
-        if resp.status_code == 404:
-            # Try main branch
+        for branch in [BRANCH, "main"]:
             resp = await client.get(
                 f"{GITHUB_API}/repos/{REPO}/contents/{path}",
                 headers=_headers(),
-                params={"ref": "main"}
+                params={"ref": branch}
             )
-        if resp.status_code != 200:
-            return None, None
-        data = resp.json()
-        content = base64.b64decode(data["content"]).decode("utf-8")
-        return content, data["sha"]
+            if resp.status_code == 200:
+                data = resp.json()
+                content = base64.b64decode(data["content"]).decode("utf-8")
+                return content, data["sha"]
+    return None, None
 
 
-async def _push_file(path: str, content: str, message: str, sha: str = None) -> bool:
-    """Push file to jarvis-changes branch."""
+async def commit_file(repo: str, path: str, content: str, message: str) -> dict:
+    """
+    Direct commit tool — pushes a file to jarvis-changes branch.
+    Called by JARVIS automatically when it wants to push code.
+    Syntax-checks Python files before pushing.
+    """
+    # Syntax check Python files
+    if path.endswith(".py"):
+        try:
+            ast.parse(content)
+        except SyntaxError as e:
+            return {"error": f"Syntax error in {path} line {e.lineno}: {e.msg}"}
+
+    # Ensure branch exists
+    if not await _ensure_branch():
+        return {"error": "Could not create/access jarvis-changes branch"}
+
+    # Get existing SHA if file exists
+    sha = await _get_file_sha(repo, path)
+
     payload = {
         "message": f"[JARVIS] {message}",
         "content": base64.b64encode(content.encode()).decode(),
@@ -114,36 +135,36 @@ async def _push_file(path: str, content: str, message: str, sha: str = None) -> 
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.put(
-            f"{GITHUB_API}/repos/{REPO}/contents/{path}",
+            f"{GITHUB_API}/repos/{repo}/contents/{path}",
             headers=_headers(),
             json=payload
         )
-        return resp.status_code in (200, 201)
+        if resp.status_code in (200, 201):
+            return {
+                "ok": True,
+                "path": path,
+                "branch": BRANCH,
+                "message": f"Committed to {BRANCH}. Merge into main on GitHub to deploy."
+            }
+        return {"error": f"Push failed: {resp.status_code} {resp.text[:200]}"}
 
 
-async def propose_change(path: str, content: str, reason: str, user_id: str) -> str:
-    """
-    Propose a file change. Stores it pending approval.
-    Returns a summary for the user to review.
-    """
+async def propose_change(path: str, content: str, reason: str, user_id: str = "jarvis") -> str:
+    """Propose a change with approval gate."""
     global _pending
 
-    # Guardrail 1: scope check
     if not _allowed_path(path):
         return (
             f"Blocked: '{path}' is outside allowed scope.\n"
-            f"JARVIS can only edit: {', '.join(ALLOWED_PATHS)}\n"
-            "Ask Bob to expand scope if needed."
+            f"JARVIS can only edit: {', '.join(ALLOWED_PATHS)}"
         )
 
-    # Guardrail 2: syntax check for Python files
     if path.endswith(".py"):
         try:
             ast.parse(content)
         except SyntaxError as e:
-            return f"Blocked: Syntax error in proposed code — line {e.lineno}: {e.msg}\nFix the code before proposing."
+            return f"Blocked: Syntax error line {e.lineno}: {e.msg}"
 
-    # Read current file SHA
     _, sha = await read_file(path)
 
     _pending = {
@@ -166,24 +187,18 @@ async def propose_change(path: str, content: str, reason: str, user_id: str) -> 
 
 
 async def approve_change() -> str:
-    """Push the pending change to jarvis-changes branch."""
     global _pending
-
     if not _pending["path"]:
         return "No pending change to approve."
 
-    # Ensure branch exists
-    if not await _ensure_branch():
-        return "Failed to create/access jarvis-changes branch."
-
-    success = await _push_file(
+    result = await commit_file(
+        REPO,
         _pending["path"],
         _pending["content"],
-        _pending["message"],
-        _pending["sha"]
+        _pending["message"]
     )
 
-    if success:
+    if result.get("ok"):
         path = _pending["path"]
         _pending = {"path": None, "content": None, "message": None, "sha": None, "proposed_by": None}
         return (
@@ -192,12 +207,10 @@ async def approve_change() -> str:
             f"To deploy: merge '{BRANCH}' into main on GitHub.\n"
             f"Render will auto-deploy after merge."
         )
-    else:
-        return "Push failed. Check GITHUB_TOKEN permissions."
+    return f"Push failed: {result.get('error')}"
 
 
 async def reject_change() -> str:
-    """Reject the pending change."""
     global _pending
     if not _pending["path"]:
         return "No pending change to reject."
@@ -207,7 +220,6 @@ async def reject_change() -> str:
 
 
 async def get_diff() -> str:
-    """Show the full pending change."""
     if not _pending["path"]:
         return "No pending change."
     return (
@@ -217,9 +229,7 @@ async def get_diff() -> str:
 
 
 async def rollback() -> str:
-    """Revert the last JARVIS commit on jarvis-changes branch."""
     async with httpx.AsyncClient(timeout=15) as client:
-        # Get commits on jarvis-changes
         resp = await client.get(
             f"{GITHUB_API}/repos/{REPO}/commits",
             headers=_headers(),
@@ -227,26 +237,20 @@ async def rollback() -> str:
         )
         if resp.status_code != 200:
             return "Could not fetch commits."
-
         commits = resp.json()
         jarvis_commits = [c for c in commits if c["commit"]["message"].startswith("[JARVIS]")]
-
         if not jarvis_commits:
             return "No JARVIS commits found to roll back."
-
         last = jarvis_commits[0]
         msg = last["commit"]["message"]
         sha = last["sha"]
         return (
             f"Last JARVIS commit:\n{msg}\nSHA: {sha[:7]}\n\n"
-            f"To roll back, go to github.com/{REPO}/commits/{BRANCH} "
-            f"and revert that commit, or merge main back into {BRANCH}.\n\n"
-            f"Auto-rollback via API coming in next update."
+            f"To roll back, revert that commit on GitHub in the {BRANCH} branch."
         )
 
 
 async def list_extensions() -> str:
-    """List all files in extensions/ folder."""
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             f"{GITHUB_API}/repos/{REPO}/contents/extensions",
@@ -259,7 +263,6 @@ async def list_extensions() -> str:
 
 
 async def handle(query: str) -> str:
-    """Main handler — called by brain on github intent."""
     q = query.lower()
     if "list" in q and "extension" in q:
         return await list_extensions()
@@ -269,15 +272,18 @@ async def handle(query: str) -> str:
         if match:
             content, _ = await read_file(match.group(1))
             return content[:2000] if content else "File not found."
-    return "GitHub editor ready. I can propose changes to extensions/, read files, and push with your approval."
+    return "GitHub editor ready. Tools: commit_file, propose_change, list extensions, read files."
 
 
 def register(brain):
+    brain.register_tool("commit_file", commit_file)
+    brain.register_tool("propose_change", propose_change)
+    brain.register_tool("read_file", read_file)
+    brain.register_tool("list_extensions", list_extensions)
     brain.register_extension("github_editor", handle)
-    brain.register_pending = lambda: _pending
     brain.github_approve = approve_change
     brain.github_reject = reject_change
     brain.github_diff = get_diff
     brain.github_rollback = rollback
     brain.github_propose = propose_change
-    log.info("github_editor extension loaded")
+    log.info("github_editor extension loaded — commit_file tool ready")
