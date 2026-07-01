@@ -214,7 +214,7 @@ class Brain:
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.groq_key}"},
             json={
-                "model": GROQ_MODELS["smart"],
+                "model": GROQ_MODELS["fast"],
                 "messages": [{"role": "system", "content": groq_system}] + history,
                 "max_tokens": 8192,
             },
