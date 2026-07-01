@@ -60,7 +60,8 @@ def _init_db():
                     category   TEXT DEFAULT 'general',
                     key        TEXT,
                     value      TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    UNIQUE(user_id, key)
                 );
                 CREATE TABLE IF NOT EXISTS notes (
                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,13 +96,8 @@ def remember(user_id: int, key: str, value: str, category: str = "general") -> d
                 """, (user_id, category, key, value, now))
             else:
                 cur.execute(
-                    "INSERT INTO memories(user_id, category, key, value, created_at) VALUES(?,?,?,?,?) "
-                    "ON CONFLICT DO NOTHING",
+                    "INSERT OR REPLACE INTO memories(user_id, category, key, value, created_at) VALUES(?,?,?,?,?)",
                     (user_id, category, key, value, now)
-                )
-                cur.execute(
-                    "UPDATE memories SET value=?, category=?, created_at=? WHERE user_id=? AND key=?",
-                    (value, category, now, user_id, key)
                 )
 
             conn.commit()
@@ -111,48 +107,42 @@ def remember(user_id: int, key: str, value: str, category: str = "general") -> d
         msg = f"✅ Saved to memory: [{category}] {key} = {value}"
         log.info(msg)
         return {"status": "ok", "message": msg}
+
     except Exception as e:
         log.error("remember() failed: %s", e)
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 
-def recall(user_id: int, query: str = "") -> dict:
+def recall(user_id: int, query: str = None) -> dict:
     """Retrieve memories. Returns everything or filters by query."""
     try:
         conn = get_conn()
         try:
             if query:
-                q = f"%{query}%"
                 if is_postgres():
                     rows = fetchall(conn,
-                        "SELECT key, value, category, created_at FROM memories "
-                        "WHERE user_id=%s AND (key ILIKE %s OR value ILIKE %s OR category ILIKE %s) "
-                        "ORDER BY created_at DESC LIMIT 50",
-                        (user_id, q, q, q)
-                    )
+                        "SELECT key, value, category FROM memories WHERE user_id=%s AND (key ILIKE %s OR value ILIKE %s)",
+                        (user_id, f"%{query}%", f"%{query}%"))
                 else:
                     rows = fetchall(conn,
-                        "SELECT key, value, category, created_at FROM memories "
-                        "WHERE user_id=? AND (key LIKE ? OR value LIKE ? OR category LIKE ?) "
-                        "ORDER BY created_at DESC LIMIT 50",
-                        (user_id, q, q, q)
-                    )
+                        "SELECT key, value, category FROM memories WHERE user_id=? AND (key LIKE ? OR value LIKE ?)",
+                        (user_id, f"%{query}%", f"%{query}%"))
             else:
                 rows = fetchall(conn,
-                    "SELECT key, value, category, created_at FROM memories "
-                    "WHERE user_id=? ORDER BY created_at DESC LIMIT 50",
-                    (user_id,)
-                )
+                    "SELECT key, value, category FROM memories WHERE user_id=?",
+                    (user_id,))
         finally:
             conn.close()
 
-        memories = [{"key": r[0], "value": r[1], "category": r[2], "when": r[3]} for r in rows]
-        if not memories:
-            return {"memories": [], "message": "No memories found."}
-        return {"memories": memories, "count": len(memories)}
+        if not rows:
+            return {"status": "ok", "memories": [], "message": "No memories found."}
+
+        memories = [{"key": r[0], "value": r[1], "category": r[2]} for r in rows]
+        return {"status": "ok", "memories": memories}
+
     except Exception as e:
         log.error("recall() failed: %s", e)
-        return {"error": str(e)}
+        return {"status": "error", "message": str(e)}
 
 
 def forget(user_id: int, key: str) -> dict:
@@ -162,41 +152,79 @@ def forget(user_id: int, key: str) -> dict:
         try:
             cur = conn.cursor()
             if is_postgres():
-                cur.execute(
-                    "DELETE FROM memories WHERE user_id=%s AND key ILIKE %s",
-                    (user_id, f"%{key}%")
-                )
+                cur.execute("DELETE FROM memories WHERE user_id=%s AND key=%s", (user_id, key))
             else:
-                cur.execute(
-                    "DELETE FROM memories WHERE user_id=? AND key LIKE ?",
-                    (user_id, f"%{key}%")
-                )
+                cur.execute("DELETE FROM memories WHERE user_id=? AND key=?", (user_id, key))
             conn.commit()
         finally:
             conn.close()
 
-        return {"status": "ok", "message": f"🗑️ Forgot: {key}"}
+        msg = f"🗑️ Forgot: {key}"
+        log.info(msg)
+        return {"status": "ok", "message": msg}
+
     except Exception as e:
         log.error("forget() failed: %s", e)
-        return {"error": str(e)}
-
-
-def get_context(user_id: int) -> str:
-    """Returns a formatted memory context string for injection into prompts."""
-    result = recall(user_id)
-    memories = result.get("memories", [])
-    if not memories:
-        return ""
-    lines = ["Bob's memory context:"]
-    for m in memories[:20]:
-        lines.append(f"  [{m['category']}] {m['key']}: {m['value']}")
-    return "\n".join(lines)
+        return {"status": "error", "message": str(e)}
 
 
 def register(brain):
+    """Register memory tools with the brain."""
     _init_db()
-    brain.register_tool("remember", remember)
-    brain.register_tool("recall", recall)
-    brain.register_tool("forget", forget)
-    brain.register_tool("get_memory_context", get_context)
-    log.info("✅ Memory extension registered — backend: %s", "postgres" if is_postgres() else "sqlite")
+
+    brain.register_tool(
+        name="remember",
+        description="Save a key/value to persistent memory. Always confirms.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "User ID"},
+                "key":     {"type": "string",  "description": "Memory key"},
+                "value":   {"type": "string",  "description": "Value to store"},
+                "category":{"type": "string",  "description": "Category (optional)", "default": "general"}
+            },
+            "required": ["user_id", "key", "value"]
+        },
+        handler=lambda args: remember(
+            user_id=args["user_id"],
+            key=args["key"],
+            value=args["value"],
+            category=args.get("category", "general")
+        )
+    )
+
+    brain.register_tool(
+        name="recall",
+        description="Retrieve memories. Returns everything or filters by query.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "User ID"},
+                "query":   {"type": "string",  "description": "Optional search filter"}
+            },
+            "required": ["user_id"]
+        },
+        handler=lambda args: recall(
+            user_id=args["user_id"],
+            query=args.get("query")
+        )
+    )
+
+    brain.register_tool(
+        name="forget",
+        description="Delete a memory by key.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "integer", "description": "User ID"},
+                "key":     {"type": "string",  "description": "Key to delete"}
+            },
+            "required": ["user_id", "key"]
+        },
+        handler=lambda args: forget(
+            user_id=args["user_id"],
+            key=args["key"]
+        )
+    )
+
+    log.info("Memory extension registered.")
