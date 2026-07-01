@@ -166,19 +166,43 @@ def get_lessons(limit: int = MAX_LESSONS) -> dict:
         cur = conn.cursor()
         if is_postgres():
             cur.execute(
-                "SELECT category, lesson, confidence FROM lessons ORDER BY confidence DESC, timestamp DESC LIMIT %s",
+                "SELECT id, category, lesson, confidence FROM lessons ORDER BY confidence DESC, timestamp DESC LIMIT %s",
                 (limit,)
             )
         else:
             cur.execute(
-                "SELECT category, lesson, confidence FROM lessons ORDER BY confidence DESC, timestamp DESC LIMIT ?",
+                "SELECT id, category, lesson, confidence FROM lessons ORDER BY confidence DESC, timestamp DESC LIMIT ?",
                 (limit,)
             )
         rows = cur.fetchall()
-        lessons = [{"category": r[0], "lesson": r[1], "confidence": r[2]} for r in rows]
+        lessons = [{"id": r[0], "category": r[1], "lesson": r[2], "confidence": r[3]} for r in rows]
         return {"status": "ok", "lessons": lessons, "count": len(lessons)}
     except Exception as e:
         log.error("get_lessons() failed: %s", e)
+        return {"status": "error", "message": str(e)}
+    finally:
+        conn.close()
+
+
+def delete_lesson(lesson_id: int) -> dict:
+    """Delete a single lesson row by its id. Returns status + how many rows were removed."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        if is_postgres():
+            cur.execute("DELETE FROM lessons WHERE id = %s", (lesson_id,))
+        else:
+            cur.execute("DELETE FROM lessons WHERE id = ?", (lesson_id,))
+        deleted = cur.rowcount
+        conn.commit()
+        if deleted > 0:
+            msg = f"🗑️ Deleted lesson id={lesson_id}"
+        else:
+            msg = f"⚠️ No lesson found with id={lesson_id}"
+        log.info(msg)
+        return {"status": "ok", "deleted": deleted, "message": msg}
+    except Exception as e:
+        log.error("delete_lesson() failed: %s", e)
         return {"status": "error", "message": str(e)}
     finally:
         conn.close()
@@ -221,6 +245,7 @@ def register(brain) -> None:
     """Register learning tools with the brain."""
     brain.register_tool("store_lesson", store_lesson)
     brain.register_tool("get_lessons", get_lessons)
+    brain.register_tool("delete_lesson", delete_lesson)
     brain.register_tool("record_feedback", record_feedback)
     brain.register_tool("learning_summary", learning_summary)
-    log.info("learning tools registered: store_lesson, get_lessons, record_feedback, learning_summary")
+    log.info("learning tools registered: store_lesson, get_lessons, delete_lesson, record_feedback, learning_summary")
