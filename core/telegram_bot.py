@@ -6,7 +6,8 @@ Compatible with Mark 5 Brain API (brain.chat, brain.set_provider, etc.)
 import os
 import logging
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes
@@ -112,11 +113,8 @@ class TelegramBot:
     async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._allowed(update):
             return await self._deny(update)
-        result = self.brain.run_tool("bot_status")
-        if isinstance(result, dict) and "error" in result:
-            await update.message.reply_text("No bot status available yet.")
-        else:
-            await update.message.reply_text(str(result))
+        result = self.brain.run_tool("bot_control", query="show status")
+        await update.message.reply_text(str(result) if result else "No bot status available.")
 
     async def cmd_pnl(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._allowed(update):
@@ -160,8 +158,6 @@ class TelegramBot:
             key=key.strip(),
             value=value.strip()
         )
-        if asyncio.iscoroutine(result):
-            result = await result
         await update.message.reply_text(str(result) if result else f"Stored: {key.strip()}")
 
     async def cmd_recall(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -172,8 +168,6 @@ class TelegramBot:
             user_id=str(self._uid(update)),
             query=args.strip()
         )
-        if asyncio.iscoroutine(result):
-            result = await result
         await update.message.reply_text(str(result) if result else "Nothing found.")
 
     async def cmd_approve(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -183,8 +177,8 @@ class TelegramBot:
             await update.message.reply_text("GitHub editor not loaded.")
             return
         msg = await update.message.reply_text("Pushing change...")
-        result = await self.brain.github_approve()
-        await msg.edit_text(result)
+        result = self.brain.github_approve()
+        await msg.edit_text(str(result))
 
     async def cmd_reject(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._allowed(update):
@@ -192,8 +186,8 @@ class TelegramBot:
         if not hasattr(self.brain, "github_reject"):
             await update.message.reply_text("GitHub editor not loaded.")
             return
-        result = await self.brain.github_reject()
-        await update.message.reply_text(result)
+        result = self.brain.github_reject()
+        await update.message.reply_text(str(result))
 
     async def cmd_diff(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._allowed(update):
@@ -201,8 +195,8 @@ class TelegramBot:
         if not hasattr(self.brain, "github_diff"):
             await update.message.reply_text("GitHub editor not loaded.")
             return
-        result = await self.brain.github_diff()
-        for chunk in self._split(result):
+        result = self.brain.github_diff()
+        for chunk in self._split(str(result)):
             await update.message.reply_text(chunk)
 
     async def cmd_rollback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -211,8 +205,8 @@ class TelegramBot:
         if not hasattr(self.brain, "github_rollback"):
             await update.message.reply_text("GitHub editor not loaded.")
             return
-        result = await self.brain.github_rollback()
-        await update.message.reply_text(result)
+        result = self.brain.github_rollback()
+        await update.message.reply_text(str(result))
 
     async def handle_message(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._allowed(update):
@@ -252,6 +246,10 @@ class TelegramBot:
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         log.info("Telegram bot polling...")
         async with app:
+            await app.bot.delete_webhook(drop_pending_updates=True)
             await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
+            await app.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+            )
             await asyncio.Event().wait()
