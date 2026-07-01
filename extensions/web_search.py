@@ -5,6 +5,10 @@ which times out from some hosting environments).
 Fallback: DuckDuckGo Instant Answer JSON API.
 Second fallback: Wikipedia search API (for factual/reference queries).
 web_search(query) -> dict with results
+
+NOTE: DDG HTML endpoint MUST be called with GET, not POST. Render's datacenter
+IPs get blocked/anti-bot-challenged on POST requests to html.duckduckgo.com.
+GET has been confirmed working live. Do not change this back to POST.
 """
 import logging
 import requests
@@ -57,9 +61,9 @@ class _DDGResultParser(HTMLParser):
 
 
 def _search_ddg_html(query: str, max_results: int) -> list:
-    resp = requests.post(
+    resp = requests.get(
         DDG_HTML_URL,
-        data={"q": query},
+        params={"q": query},
         headers=HEADERS,
         timeout=12,
     )
@@ -113,7 +117,7 @@ def _search_wikipedia(query: str, max_results: int) -> list:
     results = []
     for item in data.get("query", {}).get("search", [])[:max_results]:
         title = item.get("title", "")
-        snippet = item.get("snippet", "").replace("<span class=\"searchmatch\">", "").replace("</span>", "")
+        snippet = item.get("snippet", "").replace('<span class="searchmatch">', "").replace("</span>", "")
         results.append({
             "title": title,
             "snippet": snippet,
@@ -134,19 +138,8 @@ def web_search(query: str, max_results: int = 5) -> dict:
             results = fn(query, max_results)
             if results:
                 return {"query": query, "source": name, "results": results}
-            errors.append(f"{name}: no results")
         except Exception as e:
             errors.append(f"{name}: {e}")
-            log.warning(f"web_search provider {name} failed: {e}")
+            log.warning("web_search %s failed: %s", name, e)
 
-    return {"error": "All search providers failed", "details": errors}
-
-
-def register(brain):
-    brain.register_tool("web_search", web_search)
-    brain.system_prompt += (
-        "\n\nYou have a web_search tool available. "
-        "When asked about current events, news, prices, or anything time-sensitive, "
-        "let the user know they can use /search <query> to get live results."
-    )
-    log.info("web_search extension registered")
+    return {"query": query, "source": None, "results": [], "errors": errors}
