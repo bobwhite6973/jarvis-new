@@ -1,7 +1,7 @@
 """
 Extension: voice
 Transcription: Groq Whisper (fast, free tier)
-TTS: OpenAI TTS (onyx voice)
+TTS: ElevenLabs
 transcribe(audio_bytes) -> str
 speak(text) -> bytes (OGG/opus for Telegram voice notes)
 """
@@ -13,14 +13,12 @@ import requests
 
 log = logging.getLogger("voice")
 
-GROQ_KEY   = os.getenv("GROQ_API_KEY", "")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
-
-TTS_VOICE = os.getenv("JARVIS_TTS_VOICE", "onyx")
-TTS_MODEL = "tts-1"
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
+ELEVENLABS_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+ELEVENLABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-OPENAI_TTS_URL      = "https://api.openai.com/v1/audio/speech"
 
 
 def transcribe(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
@@ -38,28 +36,30 @@ def transcribe(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
 
 
 def speak(text: str) -> bytes:
-    if not OPENAI_KEY:
-        raise RuntimeError("OPENAI_API_KEY not set — cannot speak")
+    if not ELEVENLABS_KEY:
+        raise RuntimeError("ELEVENLABS_API_KEY not set — cannot speak")
     if len(text) > 4096:
         text = text[:4090] + "..."
     for attempt in range(3):
         try:
             resp = requests.post(
-                OPENAI_TTS_URL,
+                ELEVENLABS_TTS_URL,
                 headers={
-                    "Authorization": f"Bearer {OPENAI_KEY}",
+                    "xi-api-key": ELEVENLABS_KEY,
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": TTS_MODEL,
-                    "voice": TTS_VOICE,
-                    "input": text,
-                    "response_format": "opus",
+                    "text": text,
+                    "model_id": "eleven_monolingual_v1",
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75
+                    }
                 },
                 timeout=30,
             )
             if resp.status_code == 429:
-                wait = 2 ** attempt
+                wait = 2 * attempt
                 log.warning(f"TTS rate limited, retrying in {wait}s...")
                 time.sleep(wait)
                 continue
@@ -68,11 +68,11 @@ def speak(text: str) -> bytes:
         except Exception as e:
             if attempt == 2:
                 raise
-            time.sleep(2 ** attempt)
-    raise RuntimeError("TTS failed after 3 attempts")
+            time.sleep(2 * attempt)
+    raise RuntimeError("ElevenLabs TTS failed after 3 attempts")
 
 
 def register(brain):
     brain.register_tool("transcribe", transcribe)
     brain.register_tool("speak", speak)
-    log.info(f"voice extension registered (TTS voice: {TTS_VOICE})")
+    log.info("voice extension registered (TTS: ElevenLabs)")
