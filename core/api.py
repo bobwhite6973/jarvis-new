@@ -132,7 +132,8 @@ async def chat(req: ChatRequest):
 
         # Status
         if lower == "/status":
-            result = await run_tool("bot_control")
+            result = await run_tool("bot_control", query="show status")
+
             if isinstance(result, dict) and "error" in result:
                 return {"reply": f"❌ {result['error']}"}
             if isinstance(result, str):
