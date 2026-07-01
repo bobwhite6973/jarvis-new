@@ -60,7 +60,8 @@ def _init_db():
                     category   TEXT DEFAULT 'general',
                     key        TEXT,
                     value      TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    UNIQUE(user_id, key)
                 );
                 CREATE TABLE IF NOT EXISTS notes (
                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,13 +96,8 @@ def remember(user_id: int, key: str, value: str, category: str = "general") -> d
                 """, (user_id, category, key, value, now))
             else:
                 cur.execute(
-                    "INSERT INTO memories(user_id, category, key, value, created_at) VALUES(?,?,?,?,?) "
-                    "ON CONFLICT DO NOTHING",
+                    "INSERT OR REPLACE INTO memories(user_id, category, key, value, created_at) VALUES(?,?,?,?,?)",
                     (user_id, category, key, value, now)
-                )
-                cur.execute(
-                    "UPDATE memories SET value=?, category=?, created_at=? WHERE user_id=? AND key=?",
-                    (value, category, now, user_id, key)
                 )
 
             conn.commit()
@@ -121,35 +117,35 @@ def recall(user_id: int, query: str = None) -> dict:
     try:
         conn = get_conn()
         try:
+            cur = conn.cursor()
             if query:
-                q = f"%{query}%"
                 if is_postgres():
-                    rows = fetchall(conn,
-                        "SELECT key, value, category, created_at FROM memories "
-                        "WHERE user_id=%s AND (key ILIKE %s OR value ILIKE %s OR category ILIKE %s) "
-                        "ORDER BY created_at DESC LIMIT 50",
-                        (user_id, q, q, q)
+                    cur.execute(
+                        "SELECT key, value, category, created_at FROM memories WHERE user_id=%s AND (key ILIKE %s OR value ILIKE %s) ORDER BY created_at DESC",
+                        (user_id, f"%{query}%", f"%{query}%")
                     )
                 else:
-                    rows = fetchall(conn,
-                        "SELECT key, value, category, created_at FROM memories "
-                        "WHERE user_id=? AND (key LIKE ? OR value LIKE ? OR category LIKE ?) "
-                        "ORDER BY created_at DESC LIMIT 50",
-                        (user_id, q, q, q)
+                    cur.execute(
+                        "SELECT key, value, category, created_at FROM memories WHERE user_id=? AND (key LIKE ? OR value LIKE ?) ORDER BY created_at DESC",
+                        (user_id, f"%{query}%", f"%{query}%")
                     )
             else:
-                rows = fetchall(conn,
-                    "SELECT key, value, category, created_at FROM memories "
-                    "WHERE user_id=? ORDER BY created_at DESC LIMIT 50",
-                    (user_id,)
-                )
+                if is_postgres():
+                    cur.execute(
+                        "SELECT key, value, category, created_at FROM memories WHERE user_id=%s ORDER BY created_at DESC",
+                        (user_id,)
+                    )
+                else:
+                    cur.execute(
+                        "SELECT key, value, category, created_at FROM memories WHERE user_id=? ORDER BY created_at DESC",
+                        (user_id,)
+                    )
+            rows = cur.fetchall()
         finally:
             conn.close()
 
-        memories = [{"key": r[0], "value": r[1], "category": r[2], "when": r[3]} for r in rows]
-        if not memories:
-            return {"memories": [], "message": "No memories found."}
-        return {"memories": memories, "count": len(memories)}
+        memories = [{"key": r[0], "value": r[1], "category": r[2], "created_at": r[3]} for r in rows]
+        return {"status": "ok", "memories": memories, "count": len(memories)}
     except Exception as e:
         log.error("recall() failed: %s", e)
         return {"status": "error", "message": str(e)}
@@ -162,38 +158,28 @@ def forget(user_id: int, key: str) -> dict:
         try:
             cur = conn.cursor()
             if is_postgres():
-                cur.execute(
-                    "DELETE FROM memories WHERE user_id=%s AND key ILIKE %s",
-                    (user_id, f"%{key}%")
-                )
+                cur.execute("DELETE FROM memories WHERE user_id=%s AND key=%s", (user_id, key))
             else:
-                cur.execute(
-                    "DELETE FROM memories WHERE user_id=? AND key LIKE ?",
-                    (user_id, f"%{key}%")
-                )
+                cur.execute("DELETE FROM memories WHERE user_id=? AND key=?", (user_id, key))
             conn.commit()
+            deleted = cur.rowcount
         finally:
             conn.close()
 
-        return {"status": "ok", "message": f"🗑️ Forgot: {key}"}
-    except Exception as e:
-        log.error("forget() failed: %s", e)
-        return {"error": str(e)}
-
-        msg = f"🗑️ Forgot: {key}"
+        if deleted:
+            msg = f"🗑️ Forgot: {key}"
+        else:
+            msg = f"⚠️ No memory found for key: {key}"
         log.info(msg)
         return {"status": "ok", "message": msg}
-
     except Exception as e:
         log.error("forget() failed: %s", e)
         return {"status": "error", "message": str(e)}
 
 
-def register(brain):
+def register(brain) -> None:
     """Register memory tools with the brain."""
-    _init_db()
     brain.register_tool("remember", remember)
     brain.register_tool("recall", recall)
     brain.register_tool("forget", forget)
-    brain.register_tool("get_memory_context", get_context)
-    log.info("✅ Memory extension registered — backend: %s", "postgres" if is_postgres() else "sqlite")
+    log.info("memory tools registered: remember, recall, forget")
