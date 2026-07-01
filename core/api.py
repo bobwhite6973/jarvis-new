@@ -11,6 +11,7 @@ import re
 import logging
 import inspect
 import sqlite3
+import io
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -130,7 +131,7 @@ async def chat_with_tools(user_id: int, message: str, max_rounds: int = 3) -> st
     return strip_tool_calls(reply)
 
 
-# ── Request models ──────────────────────────────────────────────
+# ── Request model
 class ChatRequest(BaseModel):
     message: str
     user_id: int = 1
@@ -140,48 +141,23 @@ class SpeakRequest(BaseModel):
     text: str
 
 
-# ── Voice endpoints ─────────────────────────────────────────────
+# ── Routes
 
-@app.post("/api/speak")
-async def api_speak(req: SpeakRequest):
-    """Convert text to MP3 audio using ElevenLabs Adam voice."""
-    try:
-        from extensions.voice import speak
-        audio_bytes = speak(req.text)
-        return StreamingResponse(
-            iter([audio_bytes]),
-            media_type="audio/mpeg",
-            headers={"Content-Disposition": "inline; filename=response.mp3"}
-        )
-    except Exception as e:
-        log.error(f"TTS error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    html_path = Path(__file__).parent / "dashboard.html"
+    return HTMLResponse(content=html_path.read_text())
 
-
-@app.post("/api/transcribe")
-async def api_transcribe(file: UploadFile = File(...)):
-    """Transcribe uploaded audio file using Groq Whisper."""
-    try:
-        from extensions.voice import transcribe
-        audio_bytes = await file.read()
-        text = transcribe(audio_bytes, filename=file.filename or "voice.webm")
-        return {"text": text}
-    except Exception as e:
-        log.error(f"Transcribe error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ── Chat endpoint ────────────────────────────────────────────────
 
 @app.post("/api/chat")
-async def api_chat(req: ChatRequest):
+async def chat(req: ChatRequest):
     if not _brain:
-        raise HTTPException(status_code=503, detail="Brain not ready")
+        raise HTTPException(503, "Brain not ready")
 
     msg = req.message.strip()
     uid = req.user_id
 
-    # Slash command routing
+    # Slash command shortcuts
     if msg.startswith("/sol"):
         result = await run_tool("sol_price")
         return {"reply": str(result)}
@@ -195,8 +171,11 @@ async def api_chat(req: ChatRequest):
         return {"reply": str(result)}
 
     if msg.startswith("/status"):
-        result = await run_tool("bot_control", query="status")
-        return {"reply": str(result)}
+        bots = get_bot_status_from_db()
+        if not bots:
+            return {"reply": "No bots registered."}
+        lines = [f"• {b['name']}: {b['status']} | PnL: {b['pnl']}" for b in bots]
+        return {"reply": "\n".join(lines)}
 
     if msg.startswith("/search "):
         query = msg[8:].strip()
@@ -212,75 +191,104 @@ async def api_chat(req: ChatRequest):
         result = await run_tool("recall", user_id=uid, query=msg[7:].strip() or "")
         return {"reply": str(result)}
 
-    if msg.startswith("/commit "):
-        parts = msg[8:].strip().split(" ", 1)
-        result = await run_tool("commit_file", path=parts[0], content=parts[1] if len(parts) > 1 else "")
-        return {"reply": str(result)}
+    if msg.startswith("/commit"):
+        return {"reply": "Use the full commit syntax: /commit <repo> <path> <message>"}
 
-    # Default: route through brain with tool support
-    reply = await chat_with_tools(uid, msg)
-    return {"reply": reply}
+    # Default: brain handles it
+    try:
+        reply = await chat_with_tools(uid, msg)
+        return {"reply": reply}
+    except Exception as e:
+        log.error(f"Chat error: {e}")
+        raise HTTPException(500, str(e))
 
-
-# ── Status / utility endpoints ───────────────────────────────────
 
 @app.get("/api/sol")
-async def api_sol():
+async def sol():
     result = await run_tool("sol_price")
     return result
 
 
 @app.get("/api/arb")
-async def api_arb():
+async def arb():
     result = await run_tool("solana_market")
     return result
 
 
 @app.get("/api/pnl")
-async def api_pnl():
+async def pnl():
     result = await run_tool("pnl_report")
     return result
 
 
 @app.get("/api/status")
-async def api_status():
+async def status():
     bots = get_bot_status_from_db()
     return {"bots": bots, "count": len(bots)}
 
 
+@app.get("/api/memory")
+async def memory(user_id: int = 1):
+    result = await run_tool("recall", user_id=user_id, query="")
+    return {"memories": result}
+
+
+@app.get("/api/search")
+async def search(q: str):
+    result = await run_tool("web_search", query=q)
+    return result
+
+
 @app.get("/api/extensions")
-async def api_extensions():
+async def extensions():
     if not _brain:
         return {"extensions": []}
     tools = list(_brain.tools.keys())
     return {"extensions": tools, "count": len(tools)}
 
 
-@app.get("/api/memory")
-async def api_memory(user_id: int = 1):
-    result = await run_tool("recall", user_id=user_id, query="")
-    return result
-
-
-@app.get("/api/search")
-async def api_search(q: str = ""):
-    if not q:
-        return {"results": []}
-    result = await run_tool("web_search", query=q)
-    return result
-
-
 @app.get("/api/github")
-async def api_github():
+async def github():
     result = await run_tool("list_repos")
     return result
 
 
-# ── Dashboard ────────────────────────────────────────────────────
+# ── Voice endpoints
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    html_path = Path(__file__).parent / "dashboard.html"
-    if html_path.exists():
-        return HTMLResponse(content=html_path.read_text())
-    return HTMLResponse(content="<h1>JARVIS</h1><p>Dashboard not found.</p>")
+@app.post("/api/speak")
+async def speak_endpoint(req: SpeakRequest):
+    """Convert text to speech using ElevenLabs Adam voice. Returns MP3 audio."""
+    if not _brain:
+        raise HTTPException(503, "Brain not ready")
+    try:
+        audio_bytes = await run_tool("speak", text=req.text)
+        if isinstance(audio_bytes, dict) and "error" in audio_bytes:
+            raise HTTPException(500, audio_bytes["error"])
+        return StreamingResponse(
+            io.BytesIO(audio_bytes),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=speech.mp3"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"TTS error: {e}")
+        raise HTTPException(500, f"TTS failed: {e}")
+
+
+@app.post("/api/transcribe")
+async def transcribe_endpoint(file: UploadFile = File(...)):
+    """Transcribe uploaded audio file to text using Groq Whisper."""
+    if not _brain:
+        raise HTTPException(503, "Brain not ready")
+    try:
+        audio_bytes = await file.read()
+        text = await run_tool("transcribe", audio_bytes=audio_bytes, filename=file.filename or "voice.ogg")
+        if isinstance(text, dict) and "error" in text:
+            raise HTTPException(500, text["error"])
+        return {"text": str(text)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Transcription error: {e}")
+        raise HTTPException(500, f"Transcription failed: {e}")
