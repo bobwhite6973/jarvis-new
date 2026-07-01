@@ -12,8 +12,8 @@ import logging
 import inspect
 import sqlite3
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -66,7 +66,6 @@ def get_bot_status_from_db() -> list:
 def extract_tool_calls(text: str) -> list[dict]:
     """Extract all <tool_call> JSON blocks from LLM response."""
     calls = []
-    # Match both <tool_call>...</tool_call> and raw JSON tool_call blocks
     patterns = [
         r'<tool_call>\s*(\{.*?\})\s*</tool_call>',
         r'```tool_call\s*(\{.*?\})\s*```',
@@ -121,277 +120,167 @@ async def chat_with_tools(user_id: int, message: str, max_rounds: int = 3) -> st
         tool_calls = extract_tool_calls(reply)
 
         if not tool_calls:
-            # No tool calls — clean response and return
             return strip_tool_calls(reply)
 
-        # Execute all tool calls
         tool_results = await execute_tool_calls(tool_calls)
 
-        # Feed results back into brain
         tool_context = "\n".join(tool_results)
-        history_addition = (
-            f"Tool execution results:\n{tool_context}\n\n"
-            f"Based on these results, provide a clear summary to the user."
-        )
+        history_addition = f"Tool results:\n{tool_context}\n\nPlease provide your final response based on these results."
 
-        log.info(f"Round {round_num+1}: executed {len(tool_calls)} tool(s), feeding results back")
-
-    # Final pass — summarize
-    return _brain.chat(user_id, history_addition)
+    return strip_tool_calls(reply)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    html_path = Path(__file__).parent / "dashboard.html"
-    return HTMLResponse(content=html_path.read_text())
-
-
+# ── Request models ──────────────────────────────────────────────
 class ChatRequest(BaseModel):
     message: str
     user_id: int = 1
 
 
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
-    if not _brain:
-        raise HTTPException(status_code=503, detail="Brain not initialized")
+class SpeakRequest(BaseModel):
+    text: str
+
+
+# ── Voice endpoints ─────────────────────────────────────────────
+
+@app.post("/api/speak")
+async def api_speak(req: SpeakRequest):
+    """Convert text to MP3 audio using ElevenLabs Adam voice."""
     try:
-        lower = req.message.lower().strip()
-
-        # Screenshot
-        if lower.startswith("/screenshot "):
-            url = req.message.split(" ", 1)[-1].strip()
-            if url.startswith("http"):
-                result = await run_tool("browser_screenshot", url=url)
-                if isinstance(result, dict) and "error" in result:
-                    return {"reply": f"❌ {result['error']}"}
-                return {
-                    "reply": f"📸 Screenshot of {url}",
-                    "image_b64": result.get("screenshot_b64", ""),
-                    "type": "screenshot"
-                }
-
-        # Full browser render
-        if lower.startswith("/browser "):
-            url = req.message.split(" ", 1)[-1].strip()
-            if url.startswith("http"):
-                result = await run_tool("browser_fetch", url=url)
-                if isinstance(result, dict) and "error" in result:
-                    return {"reply": f"❌ {result['error']}"}
-                summary = _brain.chat(req.user_id, f"Summarize this webpage concisely:\n\n{result['content']}")
-                return {"reply": f"🌐 **{url}**\n\n{summary}"}
-
-        # Simple browse
-        if lower.startswith("/browse "):
-            url = req.message.split(" ", 1)[-1].strip()
-            if url.startswith("http"):
-                result = await run_tool("browse", url=url)
-                if isinstance(result, dict) and "error" in result:
-                    return {"reply": f"❌ {result['error']}"}
-                summary = _brain.chat(req.user_id, f"Summarize this webpage concisely:\n\n{result['content']}")
-                return {"reply": f"🌐 **{url}**\n\n{summary}"}
-
-        # Search
-        if lower.startswith("/search "):
-            query = req.message.split(" ", 1)[-1].strip()
-            result = await run_tool("web_search", query=query)
-            summary = _brain.chat(req.user_id, f"Summarize these search results for '{query}':\n\n{result}")
-            return {"reply": summary}
-
-        # SOL price
-        if lower == "/sol":
-            result = await run_tool("sol_price")
-            if isinstance(result, dict) and "error" in result:
-                return {"reply": f"❌ {result['error']}"}
-            price = result.get("price") if isinstance(result, dict) else result
-            return {"reply": f"◎ **SOL Price**: ${float(price):,.2f}"}
-
-        # Arb scan
-        if lower == "/arb":
-            result = await run_tool("solana_market")
-            if isinstance(result, dict) and "error" in result:
-                return {"reply": f"❌ {result['error']}"}
-            if isinstance(result, str):
-                return {"reply": result}
-            opps = result.get("opportunities", []) if isinstance(result, dict) else []
-            if not opps:
-                return {"reply": "No executable spreads found right now."}
-            lines = ["**📈 Solana DEX Spreads**\n"]
-            for o in opps[:8]:
-                lines.append(f"**{o['token']}** | {o['buy_dex']} → {o['sell_dex']} | Net: {o.get('net_spread_pct',0):.2f}% | Est: ${o.get('est_profit_usd',0):.4f}")
-            return {"reply": "\n".join(lines)}
-
-        # Status — reads directly from SQLite
-        if lower == "/status":
-            bots = get_bot_status_from_db()
-            if not bots:
-                return {"reply": "No bots registered yet."}
-            lines = ["**⚙️ Bot Status**\n"]
-            for b in bots:
-                icon = "🟢" if b["status"] == "running" else "🔴"
-                pnl_str = f" | PnL: {b['pnl']:+.4f}" if b["pnl"] else ""
-                lines.append(f"{icon} **{b['name']}** — {b['status']}{pnl_str}")
-            return {"reply": "\n".join(lines)}
-
-        # PnL
-        if lower == "/pnl":
-            result = await run_tool("pnl_report")
-            if isinstance(result, dict) and "error" in result:
-                return {"reply": f"❌ {result['error']}"}
-            if isinstance(result, str):
-                return {"reply": result}
-            return {"reply": (
-                f"**📊 P&L Report**\n\n"
-                f"Today: {result.get('today_pnl','N/A')}\n"
-                f"7d: {result.get('week_pnl','N/A')}\n"
-                f"Trades: {result.get('trade_count','N/A')}\n"
-                f"Win rate: {result.get('win_rate','N/A')}"
-            )}
-
-        # Recall
-        if lower == "/recall" or lower.startswith("/recall "):
-            query = req.message.split(" ", 1)[-1].strip() if " " in req.message else ""
-            result = await run_tool("recall", user_id=req.user_id, query=query)
-            if isinstance(result, str):
-                return {"reply": result}
-            memories = result.get("memories", []) if isinstance(result, dict) else []
-            if not memories:
-                return {"reply": "No memories found."}
-            lines = ["**🧠 JARVIS Memory**\n"]
-            for m in memories:
-                lines.append(f"• **{m['key']}**: {m['value']}")
-            return {"reply": "\n".join(lines)}
-
-        # GitHub repos
-        if lower in ["/github repos", "github repos"] or any(k in lower for k in ["list repos", "my repos", "list my repo", "show repos"]):
-            result = await run_tool("list_repos")
-            if isinstance(result, dict) and "error" in result:
-                return {"reply": f"❌ {result['error']}"}
-            lines = ["**📁 Your GitHub Repos**\n"]
-            for r in result.get("repos", []):
-                icon = "🔒" if r["private"] else "📂"
-                desc = f" — {r['description']}" if r.get("description") else ""
-                lines.append(f"{icon} **{r['name']}**{desc}")
-            return {"reply": "\n".join(lines)}
-
-        # GitHub approve
-        if lower == "/approve":
-            if hasattr(_brain, "github_approve"):
-                result = _brain.github_approve()
-                return {"reply": result}
-            return {"reply": "GitHub editor not loaded."}
-
-        # GitHub reject
-        if lower == "/reject":
-            if hasattr(_brain, "github_reject"):
-                result = _brain.github_reject()
-                return {"reply": result}
-            return {"reply": "GitHub editor not loaded."}
-
-        # GitHub diff
-        if lower == "/diff":
-            if hasattr(_brain, "github_diff"):
-                result = _brain.github_diff()
-                return {"reply": result}
-            return {"reply": "No pending change."}
-
-        # GitHub rollback
-        if lower == "/rollback":
-            if hasattr(_brain, "github_rollback"):
-                result = _brain.github_rollback()
-                return {"reply": result}
-            return {"reply": "GitHub editor not loaded."}
-
-        # Direct commit_file shortcut
-        if lower.startswith("/commit "):
-            # Format: /commit path/to/file.py | commit message
-            parts = req.message[8:].split("|", 1)
-            if len(parts) == 2:
-                path = parts[0].strip()
-                message = parts[1].strip()
-                content_result = await run_tool("read_file", path=path)
-                if isinstance(content_result, dict) and "content" in content_result:
-                    result = await run_tool("commit_file",
-                        repo="jarvis-new",
-                        path=path,
-                        content=content_result["content"],
-                        message=message
-                    )
-                    return {"reply": str(result)}
-            return {"reply": "Usage: /commit path/to/file.py | commit message"}
-
-        # Default — chat with tool execution
-        reply = await chat_with_tools(req.user_id, req.message)
-        return {"reply": reply}
-
+        from extensions.voice import speak
+        audio_bytes = speak(req.text)
+        return StreamingResponse(
+            iter([audio_bytes]),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "inline; filename=response.mp3"}
+        )
     except Exception as e:
-        log.error(f"Chat error: {e}")
+        log.error(f"TTS error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/transcribe")
+async def api_transcribe(file: UploadFile = File(...)):
+    """Transcribe uploaded audio file using Groq Whisper."""
+    try:
+        from extensions.voice import transcribe
+        audio_bytes = await file.read()
+        text = transcribe(audio_bytes, filename=file.filename or "voice.webm")
+        return {"text": text}
+    except Exception as e:
+        log.error(f"Transcribe error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Chat endpoint ────────────────────────────────────────────────
+
+@app.post("/api/chat")
+async def api_chat(req: ChatRequest):
+    if not _brain:
+        raise HTTPException(status_code=503, detail="Brain not ready")
+
+    msg = req.message.strip()
+    uid = req.user_id
+
+    # Slash command routing
+    if msg.startswith("/sol"):
+        result = await run_tool("sol_price")
+        return {"reply": str(result)}
+
+    if msg.startswith("/arb"):
+        result = await run_tool("solana_market")
+        return {"reply": str(result)}
+
+    if msg.startswith("/pnl"):
+        result = await run_tool("pnl_report")
+        return {"reply": str(result)}
+
+    if msg.startswith("/status"):
+        result = await run_tool("bot_control", query="status")
+        return {"reply": str(result)}
+
+    if msg.startswith("/search "):
+        query = msg[8:].strip()
+        result = await run_tool("web_search", query=query)
+        return {"reply": str(result)}
+
+    if msg.startswith("/screenshot "):
+        url = msg[12:].strip()
+        result = await run_tool("browser_screenshot", url=url)
+        return {"reply": str(result)}
+
+    if msg.startswith("/recall"):
+        result = await run_tool("recall", user_id=uid, query=msg[7:].strip() or "")
+        return {"reply": str(result)}
+
+    if msg.startswith("/commit "):
+        parts = msg[8:].strip().split(" ", 1)
+        result = await run_tool("commit_file", path=parts[0], content=parts[1] if len(parts) > 1 else "")
+        return {"reply": str(result)}
+
+    # Default: route through brain with tool support
+    reply = await chat_with_tools(uid, msg)
+    return {"reply": reply}
+
+
+# ── Status / utility endpoints ───────────────────────────────────
+
 @app.get("/api/sol")
-async def sol_price():
+async def api_sol():
     result = await run_tool("sol_price")
-    if isinstance(result, dict) and "error" in result:
-        raise HTTPException(status_code=500, detail=result["error"])
+    return result
+
+
+@app.get("/api/arb")
+async def api_arb():
+    result = await run_tool("solana_market")
+    return result
+
+
+@app.get("/api/pnl")
+async def api_pnl():
+    result = await run_tool("pnl_report")
     return result
 
 
 @app.get("/api/status")
-async def bot_status():
-    return {"bots": get_bot_status_from_db()}
-
-
-@app.get("/api/arb")
-async def arb():
-    return await run_tool("solana_market")
-
-
-@app.get("/api/memory")
-async def get_memory(user_id: int = 1):
-    return await run_tool("recall", user_id=user_id)
-
-
-@app.delete("/api/memory/{key}")
-async def delete_memory(key: str, user_id: int = 1):
-    return await run_tool("forget", user_id=user_id, key=key)
-
-
-@app.get("/api/search")
-async def search(q: str):
-    return await run_tool("web_search", query=q)
-
-
-@app.get("/api/pnl")
-async def pnl():
-    return await run_tool("pnl_report")
+async def api_status():
+    bots = get_bot_status_from_db()
+    return {"bots": bots, "count": len(bots)}
 
 
 @app.get("/api/extensions")
-async def extensions():
-    return {"extensions": list(_brain.tools.keys()) if _brain else []}
+async def api_extensions():
+    if not _brain:
+        return {"extensions": []}
+    tools = list(_brain.tools.keys())
+    return {"extensions": tools, "count": len(tools)}
 
 
-@app.get("/api/github/repos")
-async def github_repos():
-    return await run_tool("list_repos")
-
-
-@app.get("/api/github/files")
-async def github_files(repo: str, path: str = ""):
-    return await run_tool("list_files", repo=repo, path=path)
-
-
-@app.post("/api/commit")
-async def commit_file_endpoint(repo: str, path: str, content: str, message: str):
-    """Direct commit endpoint — bypasses chat, calls commit_file directly."""
-    result = await run_tool("commit_file", repo=repo, path=path, content=content, message=message)
+@app.get("/api/memory")
+async def api_memory(user_id: int = 1):
+    result = await run_tool("recall", user_id=user_id, query="")
     return result
 
 
-@app.get("/api/health")
-async def health():
-    return {
-        "status": "ok",
-        "extensions": list(_brain.tools.keys()) if _brain else []
-    }
+@app.get("/api/search")
+async def api_search(q: str = ""):
+    if not q:
+        return {"results": []}
+    result = await run_tool("web_search", query=q)
+    return result
+
+
+@app.get("/api/github")
+async def api_github():
+    result = await run_tool("list_repos")
+    return result
+
+
+# ── Dashboard ────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    html_path = Path(__file__).parent / "dashboard.html"
+    if html_path.exists():
+        return HTMLResponse(content=html_path.read_text())
+    return HTMLResponse(content="<h1>JARVIS</h1><p>Dashboard not found.</p>")
