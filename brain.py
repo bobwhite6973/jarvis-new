@@ -210,12 +210,11 @@ class Brain:
             action = f"user_query: {message[:50]}..."
             outcome = "success" if "error" not in response.lower() else "partial"
             
-            from extensions.db import get_conn
+            from extensions.db import get_conn, execute as db_execute
             conn = get_conn()
             try:
-                cur = conn.cursor()
                 now = datetime.now(timezone.utc).isoformat()
-                cur.execute("""
+                db_execute(conn, """
                     INSERT INTO interactions (timestamp, category, action, outcome, context)
                     VALUES (?, ?, ?, ?, ?)
                 """, (now, category, action, outcome, json.dumps({
