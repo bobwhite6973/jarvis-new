@@ -1,9 +1,9 @@
 """
 Extension: voice
 Transcription: Groq Whisper (fast, free tier)
-TTS: ElevenLabs
+TTS: ElevenLabs (Adam voice — deep, confident, natural)
 transcribe(audio_bytes) -> str
-speak(text) -> bytes (OGG/opus for Telegram voice notes)
+speak(text) -> bytes (MP3 audio)
 """
 import os
 import io
@@ -15,7 +15,7 @@ log = logging.getLogger("voice")
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 ELEVENLABS_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")  # Adam
 ELEVENLABS_TTS_URL = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
 GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -52,14 +52,16 @@ def speak(text: str) -> bytes:
                     "text": text,
                     "model_id": "eleven_monolingual_v1",
                     "voice_settings": {
-                        "stability": 0.5,
-                        "similarity_boost": 0.75
+                        "stability": 0.75,
+                        "similarity_boost": 0.85,
+                        "style": 0.20,
+                        "use_speaker_boost": True
                     }
                 },
                 timeout=30,
             )
             if resp.status_code == 429:
-                wait = 2 * attempt
+                wait = 2 ** attempt
                 log.warning(f"TTS rate limited, retrying in {wait}s...")
                 time.sleep(wait)
                 continue
@@ -68,11 +70,11 @@ def speak(text: str) -> bytes:
         except Exception as e:
             if attempt == 2:
                 raise
-            time.sleep(2 * attempt)
+            time.sleep(2 ** attempt)
     raise RuntimeError("ElevenLabs TTS failed after 3 attempts")
 
 
 def register(brain):
     brain.register_tool("transcribe", transcribe)
     brain.register_tool("speak", speak)
-    log.info("voice extension registered (TTS: ElevenLabs)")
+    log.info(f"voice extension registered (TTS: ElevenLabs Adam voice {ELEVENLABS_VOICE_ID})")
