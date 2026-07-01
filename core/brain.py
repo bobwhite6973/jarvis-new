@@ -1,7 +1,7 @@
 """
 JARVIS Brain — Multi-provider LLM router with native tool use.
 
-Default: Groq (llama-3.3-70b-versatile) — free, fast
+Default: Groq (llama-3.1-8b-instant) — free, fast, high rate limits
 Fallback: Claude (claude-sonnet-4-6) — if credits available
 Optional: OpenAI (gpt-4o)
 """
@@ -42,21 +42,13 @@ SYSTEM_PROMPT = (
     "3. When asked to write and commit code: write the code yourself, then call commit_file.\n"
     "4. Do NOT call generate_code — write the code directly.\n"
     "5. NEVER fabricate tool responses. Report actual results.\n"
-    "6. You CAN call multiple different tools in one response — use them freely."
+    "6. You CAN call multiple different tools in one response."
 )
 
 EXCLUDE_FROM_CLAUDE_TOOLS = {
-    "generate_code",
-    "review_code",
-    "fix_code",
-    "improve_code",
-    "explain_code",
-    "browser_run",
-    "audit_repo",
-    "get_memory_context",
-    "memory_store",
-    "memory_recall",
-    "record_tool_call",
+    "generate_code", "review_code", "fix_code", "improve_code", "explain_code",
+    "browser_run", "audit_repo", "get_memory_context", "memory_store",
+    "memory_recall", "record_tool_call",
 }
 
 
@@ -173,11 +165,15 @@ class Brain:
         history = self.history.setdefault(user_id, [])
         history.append({"role": "user", "content": message})
 
+        # Keep history short to avoid payload limits
+        if len(history) > 10:
+            self.history[user_id] = history[-10:]
+            history = self.history[user_id]
+
         available = self._available_providers()
         if not available:
             return "No API keys configured. Add GROQ_API_KEY to Render environment."
 
-        # Build order: preferred first, then others
         order = [preferred] + [p for p in PROVIDERS if p != preferred and p in available]
         order = [p for p in order if p in available]
 
@@ -185,8 +181,6 @@ class Brain:
             try:
                 reply = self._call(p, list(history))
                 history.append({"role": "assistant", "content": reply})
-                if len(history) > 40:
-                    self.history[user_id] = history[-40:]
                 return reply
             except Exception as e:
                 log.warning(f"Provider {p} failed: {e}")
@@ -210,13 +204,22 @@ class Brain:
             if name not in EXCLUDE_FROM_CLAUDE_TOOLS
         )
         groq_system = self.system_prompt + f"\n\nAvailable tools:\n{tool_list}"
+
+        # Trim history content to avoid 413
+        trimmed = []
+        for msg in history[-6:]:  # Only last 6 messages
+            content = msg["content"]
+            if isinstance(content, str) and len(content) > 1000:
+                content = content[:1000] + "...[truncated]"
+            trimmed.append({"role": msg["role"], "content": content})
+
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.groq_key}"},
             json={
                 "model": GROQ_MODELS["fast"],
-                "messages": [{"role": "system", "content": groq_system}] + history,
-                "max_tokens": 8192,
+                "messages": [{"role": "system", "content": groq_system}] + trimmed,
+                "max_tokens": 2048,
             },
             timeout=30,
         )
@@ -224,7 +227,6 @@ class Brain:
         return resp.json()["choices"][0]["message"]["content"]
 
     def _call_claude(self, history: list) -> str:
-        """Claude with native tool use — only used if credits available."""
         claude_tools = build_claude_tools(self.tools)
         messages = list(history)
         max_rounds = 5
@@ -233,7 +235,7 @@ class Brain:
         for round_num in range(max_rounds):
             kwargs = {
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 8192,
+                "max_tokens": 4096,
                 "system": self.system_prompt,
                 "messages": messages,
             }
@@ -260,7 +262,6 @@ class Brain:
 
                         call_key = f"{tool_name}:{str(tool_input)[:100]}"
                         if call_key in tools_called:
-                            log.warning(f"Duplicate call blocked: {tool_name}")
                             result = {"error": f"Duplicate call blocked: {tool_name}"}
                         else:
                             tools_called.add(call_key)
@@ -268,8 +269,6 @@ class Brain:
                             result = self._execute_tool(tool_name, tool_input)
 
                         result_str = json.dumps(result, default=str) if isinstance(result, dict) else str(result)
-                        log.info(f"Tool {tool_name} result: {result_str[:200]}")
-
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_use_id,
@@ -285,11 +284,10 @@ class Brain:
                         return block.text
                 return f"Stopped: {resp.stop_reason}"
 
-        log.warning("Tool loop hit max rounds — requesting final summary")
-        messages.append({"role": "user", "content": "Summarize what you did and the results."})
+        messages.append({"role": "user", "content": "Summarize what you did."})
         final = self.anthropic_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2048,
+            max_tokens=1024,
             system=self.system_prompt,
             messages=messages,
         )
@@ -304,7 +302,7 @@ class Brain:
         resp = self.openai.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "system", "content": self.system_prompt}] + history,
-            max_tokens=8192,
+            max_tokens=2048,
         )
         return resp.choices[0].message.content
 
