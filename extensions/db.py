@@ -27,7 +27,7 @@ RETRY_DELAY_SECONDS = float(os.environ.get("DB_RETRY_DELAY", "0.75"))
 DB_TYPE = "postgres" if os.environ.get("DATABASE_URL") else "sqlite"
 
 
-def _database_url() -> str | None:
+def _database_url():
     """
     Always re-read the env var at call time rather than caching it once
     at import time. This does NOT fix the need for Render to restart the
