@@ -210,7 +210,7 @@ class Brain:
         for round_num in range(max_rounds):
             kwargs = {
                 "model": "claude-sonnet-4-6",
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "system": self.system_prompt,
                 "messages": messages,
             }
@@ -268,7 +268,7 @@ class Brain:
         messages.append({"role": "user", "content": "Summarize what you did and the results."})
         final = self.anthropic_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1024,
+            max_tokens=2048,
             system=self.system_prompt,
             messages=messages,
         )
