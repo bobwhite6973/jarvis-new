@@ -20,6 +20,7 @@ DB_TYPE = "postgres" if os.environ.get("DATABASE_URL") else "sqlite"
 
 
 def _database_url():
+    # Read live from env every call - never cache at import time.
     return os.environ.get("DATABASE_URL")
 
 
