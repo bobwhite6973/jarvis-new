@@ -1,6 +1,8 @@
 """
 Shared database utility for JARVIS extensions.
 Uses Postgres (via DATABASE_URL env var) as primary connection.
+Falls back to SQLite only if DATABASE_URL is not set or connection fails
+after retries.
 Falls back to SQLite only if DATABASE_URL is not set or connection fails.
 
 Usage:
@@ -8,6 +10,7 @@ Usage:
 """
 
 import os
+import time
 import logging
 from pathlib import Path
 
@@ -16,8 +19,6 @@ log = logging.getLogger("jarvis.db")
 # No hardcoded credentials — must be provided via environment variable.
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# SQLite fallback path
-SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
 
 DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
 
@@ -46,9 +47,12 @@ def get_conn():
 
     # SQLite fallback
     DB_TYPE = "sqlite"
+    return _sqlite_conn()
+
+
+def _sqlite_conn():
     import sqlite3
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    log.warning("Using ephemeral SQLite - data will be lost on redeploy!")
     return sqlite3.connect(SQLITE_PATH)
 
 
@@ -57,25 +61,16 @@ def is_postgres() -> bool:
 
 
 def placeholder() -> str:
-    """Returns the correct SQL placeholder for the active DB."""
     return "%s" if is_postgres() else "?"
 
 
 def execute(conn, sql: str, params: tuple = ()):
-    """
-    Execute a SQL statement with correct placeholder style.
-    Translates ? -> %s for Postgres automatically.
-    """
     if is_postgres():
         sql = sql.replace("?", "%s")
     conn.cursor().execute(sql, params)
 
 
 def executescript_compat(conn, sql: str):
-    """
-    Execute a multi-statement SQL script.
-    Uses executescript for SQLite, executes statements individually for Postgres.
-    """
     if is_postgres():
         cur = conn.cursor()
         for statement in sql.strip().split(";"):
@@ -88,7 +83,6 @@ def executescript_compat(conn, sql: str):
 
 
 def fetchall(conn, sql: str, params: tuple = ()) -> list:
-    """Execute a SELECT and return all rows."""
     if is_postgres():
         sql = sql.replace("?", "%s")
         cur = conn.cursor()
@@ -99,7 +93,6 @@ def fetchall(conn, sql: str, params: tuple = ()) -> list:
 
 
 def fetchone(conn, sql: str, params: tuple = ()):
-    """Execute a SELECT and return one row."""
     if is_postgres():
         sql = sql.replace("?", "%s")
         cur = conn.cursor()
@@ -109,4 +102,4 @@ def fetchone(conn, sql: str, params: tuple = ()):
         return conn.execute(sql, params).fetchone()
 
 
-log.info("JARVIS DB layer initialized — using %s", DB_TYPE.upper())
+log.info("JARVIS DB layer initialized — DATABASE_URL present at import: %s", bool(os.environ.get("DATABASE_URL")))
