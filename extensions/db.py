@@ -3,6 +3,10 @@ Shared database utility for JARVIS extensions.
 Uses Postgres (via DATABASE_URL env var) as primary connection.
 Falls back to SQLite only if DATABASE_URL is not set or connection fails
 after retries.
+Falls back to SQLite only if DATABASE_URL is not set or connection fails.
+
+Usage:
+    from extensions.db import get_conn, DB_TYPE
 """
 
 import os
@@ -12,54 +16,36 @@ from pathlib import Path
 
 log = logging.getLogger("jarvis.db")
 
-SQLITE_PATH = Path(os.environ.get("SQLITE_PATH", "data/jarvis.db"))
-CONNECT_RETRIES = int(os.environ.get("DB_CONNECT_RETRIES", "3"))
-RETRY_DELAY_SECONDS = float(os.environ.get("DB_RETRY_DELAY", "0.75"))
-
-DB_TYPE = "postgres" if os.environ.get("DATABASE_URL") else "sqlite"
+# No hardcoded credentials — must be provided via environment variable.
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 
-def _database_url():
-    # Read live from env every call - never cache at import time.
-    return os.environ.get("DATABASE_URL")
+DB_TYPE = "postgres" if DATABASE_URL else "sqlite"
 
 
 def get_conn():
+    """
+    Returns a database connection.
+    - Postgres if DATABASE_URL env var is set and connection succeeds
+    - SQLite fallback if DATABASE_URL is missing or connection fails
+    """
     global DB_TYPE
-    database_url = _database_url()
 
-    if database_url:
-        last_err = None
+    if DATABASE_URL:
         try:
             import psycopg2
+            conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+            DB_TYPE = "postgres"
+            log.debug("Connected to Postgres")
+            return conn
         except ImportError:
-            log.critical("psycopg2 not installed — falling back to SQLite. Memory will NOT persist across redeploys.")
-            DB_TYPE = "sqlite"
-            return _sqlite_conn()
-
-        for attempt in range(1, CONNECT_RETRIES + 1):
-            try:
-                conn = psycopg2.connect(database_url, sslmode="require", connect_timeout=5)
-                DB_TYPE = "postgres"
-                if attempt > 1:
-                    log.warning("Postgres connection succeeded on retry attempt %d", attempt)
-                return conn
-            except Exception as e:
-                last_err = e
-                log.error("Postgres connection attempt %d/%d failed: %s", attempt, CONNECT_RETRIES, e)
-                if attempt < CONNECT_RETRIES:
-                    time.sleep(RETRY_DELAY_SECONDS)
-
-        log.critical(
-            "Postgres connection FAILED after %d attempts (%s) — falling back to EPHEMERAL SQLite.",
-            CONNECT_RETRIES, last_err
-        )
+            log.error("psycopg2 not installed — falling back to SQLite")
+        except Exception as e:
+            log.error("Postgres connection failed: %s — falling back to SQLite", e)
     else:
-        log.critical(
-            "DATABASE_URL is not set in this process's environment — falling back to EPHEMERAL SQLite. "
-            "If you just added it in Render, the running process must be RESTARTED/REDEPLOYED to pick it up."
-        )
+        log.warning("DATABASE_URL not set — falling back to SQLite")
 
+    # SQLite fallback
     DB_TYPE = "sqlite"
     return _sqlite_conn()
 
