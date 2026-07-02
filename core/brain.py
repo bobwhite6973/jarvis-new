@@ -8,6 +8,8 @@ Optional: OpenAI (gpt-4o)
 NEW: Auto-recall relevant memories before each response
      Auto-store interactions after each response
      Sync AND async tool functions now both supported
+PATCHED: Added hard cap on tool-call loop iterations + token usage logging
+         to prevent runaway API costs from repeated tool failures.
 """
 
 import os
@@ -57,6 +59,13 @@ EXCLUDE_FROM_CLAUDE_TOOLS = {
     "browser_run", "audit_repo", "get_memory_context", "memory_store",
     "memory_recall", "record_tool_call",
 }
+
+# Hard cap on how many times the Claude tool-use loop can iterate for a
+# single user message. Without this, a repeatedly-failing tool (e.g.
+# commit_file hitting a bad DB connection) can cause the loop to call the
+# Claude API dozens of times in a row, with the message history growing on
+# every call, burning API credits very fast.
+MAX_TOOL_ITERATIONS = 6
 
 
 def build_claude_tools(tools: dict) -> list:
@@ -315,8 +324,23 @@ class Brain:
         try:
             claude_tools = build_claude_tools(self.tools)
             messages = list(history)
+            iteration = 0
 
             while True:
+                iteration += 1
+                if iteration > MAX_TOOL_ITERATIONS:
+                    log.error(
+                        f"Tool loop exceeded {MAX_TOOL_ITERATIONS} iterations for user {user_id} — "
+                        f"stopping to prevent runaway API usage. A tool is likely failing repeatedly."
+                    )
+                    reply = (
+                        f"⚠️ Stopped after {MAX_TOOL_ITERATIONS} tool-call attempts without finishing. "
+                        f"A tool is probably failing repeatedly (check the Render logs for the tool name "
+                        f"and error). I stopped here to avoid burning more API credits."
+                    )
+                    self.history[user_id].append({"role": "assistant", "content": reply})
+                    return reply
+
                 kwargs = dict(
                     model="claude-sonnet-5",
                     max_tokens=4096,
@@ -327,6 +351,17 @@ class Brain:
                     kwargs["tools"] = claude_tools
 
                 resp = self.anthropic_client.messages.create(**kwargs)
+
+                # Log token usage so cost spikes are visible in Render logs
+                # instead of only showing up on the Anthropic bill.
+                try:
+                    usage = resp.usage
+                    log.info(
+                        f"[Claude usage] user={user_id} iter={iteration} "
+                        f"input_tokens={usage.input_tokens} output_tokens={usage.output_tokens}"
+                    )
+                except Exception:
+                    pass
 
                 # Collect all text and tool_use blocks
                 tool_calls = [b for b in resp.content if b.type == "tool_use"]
