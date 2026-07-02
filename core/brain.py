@@ -106,6 +106,53 @@ def build_claude_tools(tools: dict) -> list:
     return claude_tools
 
 
+def build_openai_tools(tools: dict) -> list:
+    """
+    Same tool schema as build_claude_tools, but in the OpenAI/Groq
+    'function calling' shape instead of Claude's 'input_schema' shape.
+    Used for _chat_groq and _chat_openai so those providers can actually
+    call real tools instead of only generating text about them.
+    """
+    openai_tools = []
+    for name, fn in tools.items():
+        if name in EXCLUDE_FROM_CLAUDE_TOOLS:
+            continue
+        try:
+            sig = inspect.signature(fn)
+            properties = {}
+            required = []
+            for param_name, param in sig.parameters.items():
+                if param_name in ("self", "brain"):
+                    continue
+                prop = {"type": "string", "description": f"{param_name} parameter"}
+                if param.annotation != inspect.Parameter.empty:
+                    ann = param.annotation
+                    if ann == int:
+                        prop["type"] = "integer"
+                    elif ann == float:
+                        prop["type"] = "number"
+                    elif ann == bool:
+                        prop["type"] = "boolean"
+                properties[param_name] = prop
+                if param.default == inspect.Parameter.empty:
+                    required.append(param_name)
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": (fn.__doc__ or f"Tool: {name}").strip()[:200],
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        except Exception as e:
+            log.warning(f"Could not build OpenAI-style tool schema for {name}: {e}")
+    return openai_tools
+
+
 class Brain:
     def __init__(self):
         self.anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
@@ -278,27 +325,79 @@ class Brain:
         if not self.groq_key:
             return self._chat_claude(user_id, history)
         try:
+            groq_tools = build_openai_tools(self.tools)
+            messages = [{"role": "system", "content": self.system_prompt}] + list(history)
             headers = {
                 "Authorization": f"Bearer {self.groq_key}",
                 "Content-Type": "application/json",
             }
-            messages = [{"role": "system", "content": self.system_prompt}] + history
-            payload = {
-                "model": GROQ_MODELS["fast"],
-                "messages": messages,
-                "max_tokens": 1024,
-            }
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            reply = data["choices"][0]["message"]["content"]
-            self.history[user_id].append({"role": "assistant", "content": reply})
-            return reply
+            iteration = 0
+
+            while True:
+                iteration += 1
+                if iteration > MAX_TOOL_ITERATIONS:
+                    log.error(
+                        f"Groq tool loop exceeded {MAX_TOOL_ITERATIONS} iterations for user {user_id} — "
+                        f"stopping to prevent runaway usage."
+                    )
+                    reply = (
+                        f"⚠️ Stopped after {MAX_TOOL_ITERATIONS} tool-call attempts on Groq without "
+                        f"finishing. A tool may be failing repeatedly."
+                    )
+                    self.history[user_id].append({"role": "assistant", "content": reply})
+                    return reply
+
+                payload = {
+                    "model": GROQ_MODELS["fast"],
+                    "messages": messages,
+                    "max_tokens": 1024,
+                }
+                if groq_tools:
+                    payload["tools"] = groq_tools
+
+                resp = requests.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                usage = data.get("usage", {})
+                log.info(
+                    f"[Groq usage] user={user_id} iter={iteration} "
+                    f"prompt_tokens={usage.get('prompt_tokens')} "
+                    f"completion_tokens={usage.get('completion_tokens')}"
+                )
+
+                message = data["choices"][0]["message"]
+                tool_calls = message.get("tool_calls")
+
+                if not tool_calls:
+                    reply = message.get("content", "") or ""
+                    self.history[user_id].append({"role": "assistant", "content": reply})
+                    return reply
+
+                messages.append(message)
+
+                for tool_call in tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    try:
+                        tool_args = json.loads(tool_call["function"].get("arguments") or "{}")
+                    except Exception:
+                        tool_args = {}
+                    log.info(f"[Groq] Tool call: {tool_name}({tool_args})")
+                    try:
+                        result = self.run_tool(tool_name, **tool_args)
+                    except Exception as e:
+                        result = {"error": str(e)}
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(result) if not isinstance(result, str) else result,
+                    })
+
         except Exception as e:
             log.warning(f"Groq failed, falling back to Claude: {e}")
             return self._chat_claude(user_id, history)
