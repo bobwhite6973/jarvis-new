@@ -226,7 +226,7 @@ class Brain:
                 now = datetime.now(timezone.utc).isoformat()
                 cur.execute("""
                     INSERT INTO interactions (timestamp, category, action, outcome, context)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                 """, (now, category, action, outcome, json.dumps({
                     "message": message[:200],
                     "response_preview": response[:200],
