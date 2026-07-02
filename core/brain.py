@@ -29,8 +29,8 @@ INTENT_PROVIDER = {
     "arb":     "groq",
     "pnl":     "groq",
     "status":  "groq",
-    "genbot":  "claude",
-    "default": "claude",
+    "genbot":  "groq",
+    "default": "groq",
 }
 
 GROQ_MODELS = {
